@@ -641,9 +641,14 @@ export default function App() {
             );
           }}
           onCreatePart={(payload) => {
+            const normalizedCode =
+              payload.maPhuTung
+                .trim()
+                .toUpperCase()
+                .replace(/[^A-Z0-9_-]/g, '-')
+                .slice(0, 32) || 'PART';
             const exists = state.items.some(
-              (it) =>
-                it.catalog.maPhuTung.toUpperCase() === payload.maPhuTung.trim().toUpperCase()
+              (it) => it.catalog.maPhuTung.toUpperCase() === normalizedCode
             );
             const autoWrite = sheetsWriteMode !== 'NONE';
             return runWithConfirmation(
@@ -654,7 +659,7 @@ export default function App() {
                   : 'Phụ tùng mới sẽ được lưu vào Firebase Firestore để theo dõi tồn kho trên mọi thiết bị.',
                 sheetName: 'Firebase Firestore (catalog_parts_custom)',
                 details: [
-                  { label: 'Mã phụ tùng', value: payload.maPhuTung.toUpperCase() },
+                  { label: 'Mã phụ tùng', value: normalizedCode },
                   { label: 'Tên phụ tùng', value: payload.tenPhuTung },
                   { label: 'Đơn vị tính', value: payload.donViTinh },
                   { label: 'Giá nhập TK', value: formatCurrency(payload.giaNhapThamChieu) },
@@ -667,11 +672,10 @@ export default function App() {
               },
               async () => {
                 if (exists) {
-                  throw new Error(`Mã phụ tùng "${payload.maPhuTung.toUpperCase()}" đã tồn tại.`);
+                  throw new Error(`Mã phụ tùng "${normalizedCode}" đã tồn tại.`);
                 }
                 setSyncState('SYNCING');
                 try {
-                  const normalizedCode = payload.maPhuTung.trim().toUpperCase();
                   const partPayload = {
                     maPhuTung: normalizedCode,
                     tenPhuTung: payload.tenPhuTung,

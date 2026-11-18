@@ -566,7 +566,8 @@ export async function syncAllWebStateToGoogleSheet(params: {
   };
 }
 
-export const APPS_SCRIPT_CODE = `// Dán toàn bộ đoạn mã này vào: Tiện ích mở rộng -> Apps Script -> Lưu -> Triển khai (Web app -> Anyone)
+export const APPS_SCRIPT_CODE = `// Dán toàn bộ mã này vào: Tiện ích mở rộng -> Apps Script -> Lưu -> Triển khai (Web app -> Anyone)
+// Lưu ý: Tắt "Google Dịch" trên trình duyệt khi thao tác trong Apps Script để tránh làm biến dạng mã!
 const TABS = {
   CATALOG: 'Danh mục phụ tùng',
   TRANSACTIONS: 'PHU TUNG KHO',
@@ -584,6 +585,21 @@ function parseIsoDate(iso) {
   var m = String(iso || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);
   if (!m) return iso || '';
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function doGet(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    return jsonOut({
+      ok: true,
+      status: 'ready',
+      spreadsheetId: ss.getId(),
+      spreadsheetName: ss.getName(),
+      action: e && e.parameter ? e.parameter.action || 'ping' : 'ping'
+    });
+  } catch (err) {
+    return jsonOut({ ok: false, error: err && err.message ? err.message : String(err) });
+  }
 }
 
 function appendTxInternal(ss, tx) {
@@ -707,9 +723,18 @@ function updateThamSoInternal(ss, thamSo) {
 
 function doPost(e) {
   var lock = LockService.getScriptLock();
-  lock.waitLock(15000);
+  var hasLock = false;
   try {
-    var body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    lock.waitLock(15000);
+    hasLock = true;
+
+    var raw = '';
+    if (e && e.postData && e.postData.contents) {
+      raw = e.postData.contents;
+    } else if (e && e.parameter && e.parameter.payload) {
+      raw = e.parameter.payload;
+    }
+    var body = raw ? JSON.parse(raw) : {};
     var ss = SpreadsheetApp.getActiveSpreadsheet();
 
     if (body.action === 'ping') {
@@ -768,18 +793,75 @@ function doPost(e) {
   } catch (err) {
     return jsonOut({ ok: false, error: err && err.message ? err.message : String(err) });
   } finally {
-    lock.releaseLock();
+    if (hasLock) {
+      try {
+        lock.releaseLock();
+      } catch (ignore) {}
+    }
   }
 }`;
+
+const APPS_SCRIPT_URL_PATTERN =
+  /^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec$/;
 
 async function callAppsScriptWebhook<T extends Record<string, unknown>>(
   webhookUrl: string,
   payload: Record<string, unknown>
 ): Promise<T> {
+  const cleanedUrl = webhookUrl.trim();
+  if (!APPS_SCRIPT_URL_PATTERN.test(cleanedUrl)) {
+    throw new Error(
+      'Link Apps Script không hợp lệ. Link đúng phải có dạng: https://script.google.com/macros/s/.../exec'
+    );
+  }
+
+  // 1. Try direct browser POST using text/plain (CORS simple request, no preflight)
+  //    to bypass cloud datacenter IP HTTP 403 blocks from Google ESF.
+  try {
+    const directRes = await fetch(cleanedUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+    });
+
+    const directText = await directRes.text();
+    const trimmed = directText.trim();
+    if (trimmed && !trimmed.startsWith('<')) {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (parsed.ok === false) {
+        throw new Error(
+          typeof parsed.error === 'string' && parsed.error
+            ? parsed.error
+            : 'Apps Script trả về lỗi khi thực thi.'
+        );
+      }
+      if (directRes.ok) {
+        return parsed as T;
+      }
+    }
+  } catch (directErr) {
+    // Re-throw explicit application errors reported by Code.gs itself
+    if (
+      directErr instanceof Error &&
+      !directErr.message.includes('Failed to fetch') &&
+      !directErr.message.includes('NetworkError') &&
+      !directErr.message.includes('Load failed') &&
+      !directErr.message.includes('Unexpected token') &&
+      !directErr.message.includes('JSON')
+    ) {
+      throw directErr;
+    }
+    // Otherwise fall through to server proxy for network bypass or detailed HTTP 403/404 diagnostics
+  }
+
+  // 2. Fallback to backend proxy (/api/sheets/webhook)
   const res = await fetch('/api/sheets/webhook', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ webhookUrl, payload }),
+    body: JSON.stringify({ webhookUrl: cleanedUrl, payload }),
   });
   const text = await res.text();
   let parsed: Record<string, unknown> = {};

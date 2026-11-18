@@ -84,7 +84,13 @@ export function createApiApp(): express.Express {
         err instanceof Error
           ? err.message
           : 'Không thể gửi dữ liệu tới Google Apps Script.';
-      const status = msg.includes('không hợp lệ') ? 400 : 502;
+      const status = msg.includes('không hợp lệ')
+        ? 400
+        : msg.includes('HTTP 403')
+        ? 403
+        : msg.includes('HTTP 404')
+        ? 404
+        : 502;
       res.status(status).json({ error: msg });
     }
   });

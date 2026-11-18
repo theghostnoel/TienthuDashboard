@@ -233,7 +233,7 @@ export function TransactionsPage({
           Nhập kho (NHAP_NCC) & Xuất kho (XUAT_SUA_CHUA)
         </h1>
         <p className="text-xs sm:text-sm text-zinc-500 mt-0.5">
-          Lưu giao dịch trực tiếp vào <strong>Firebase Firestore</strong> để đồng bộ đa thiết bị và tự động ghi vào tab <code className="font-mono text-zinc-700">PHU TUNG KHO</code> trên Google Sheets (khi đã đăng nhập Google) để tồn kho khớp 100%.
+          Lưu giao dịch trực tiếp vào <strong>Firebase Firestore</strong> để đồng bộ đa thiết bị và tự động ghi vào tab <code translate="no" className="notranslate font-mono text-zinc-700">PHU TUNG KHO</code> trên Google Sheets (khi bật đồng bộ tự động Apps Script hoặc OAuth) để tồn kho khớp 100%.
         </p>
       </div>
 
@@ -296,7 +296,7 @@ export function TransactionsPage({
                 Mã phụ tùng *
               </label>
               <select
-                value={maPhuTung}
+                value={selectedItem?.catalog.maPhuTung || maPhuTung}
                 onChange={(e) => {
                   setMaPhuTung(e.target.value);
                   invalidateReqId();

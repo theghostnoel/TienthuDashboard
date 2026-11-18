@@ -423,7 +423,7 @@ export function PartsPage({
               )}
 
               <div className="p-3 rounded-lg bg-zinc-50 border border-zinc-200 text-[11px] text-zinc-600">
-                Thay đổi tại đây sẽ lưu vào <code className="font-mono text-zinc-800">catalog_parts_custom</code> trên Firebase Firestore, đồng bộ thời gian thực mọi thiết bị và tự động cập nhật tab <code className="font-mono text-zinc-800">Danh mục phụ tùng</code> trên Google Sheets khi đã kết nối tài khoản Google.
+                Thay đổi tại đây sẽ lưu vào <code translate="no" className="notranslate font-mono text-zinc-800">catalog_parts_custom</code> trên Firebase Firestore, đồng bộ thời gian thực mọi thiết bị và tự động cập nhật tab <code translate="no" className="notranslate font-mono text-zinc-800">Danh mục phụ tùng</code> trên Google Sheets khi đã bật Apps Script Webhook hoặc OAuth.
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

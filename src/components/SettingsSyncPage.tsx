@@ -307,7 +307,8 @@ export function SettingsSyncPage({
                 value={webhookInput}
                 onChange={(e) => setWebhookInput(e.target.value)}
                 placeholder="https://script.google.com/macros/s/.../exec"
-                className="flex-1 h-10 px-3 rounded-lg border border-zinc-200 font-mono text-xs text-zinc-900 focus:outline-none focus:border-orange-500"
+                translate="no"
+                className="notranslate flex-1 h-10 px-3 rounded-lg border border-zinc-200 font-mono text-xs text-zinc-900 focus:outline-none focus:border-orange-500"
               />
               <button
                 type="submit"
@@ -318,6 +319,20 @@ export function SettingsSyncPage({
                   ? 'Đang kiểm tra...'
                   : 'Kiểm tra & Kích hoạt tự động'}
               </button>
+              {/^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec$/.test(
+                webhookInput.trim()
+              ) && (
+                <a
+                  href={`${webhookInput.trim()}?action=ping`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="h-10 px-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 font-semibold whitespace-nowrap inline-flex items-center gap-1.5"
+                  title="Mở link /exec trong tab mới (hoặc tab Ẩn danh) để kiểm tra Google có trả về JSON {ok: true} không"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Thử mở /exec
+                </a>
+              )}
               {configuredWebhookUrl && (
                 <button
                   type="button"
@@ -397,16 +412,19 @@ export function SettingsSyncPage({
               </button>
             </div>
 
-            <ol className="list-decimal list-inside space-y-1 text-zinc-700 text-[11px] leading-relaxed">
+            <ol className="list-decimal list-inside space-y-1.5 text-zinc-700 text-[11px] leading-relaxed">
               <li>
-                Mở file Google Sheets của bạn → chọn menu <strong>Tiện ích mở rộng (Extensions)</strong> → <strong>Apps Script</strong>.
+                Mở file Google Sheets của bạn → chọn menu <strong>Tiện ích mở rộng (Extensions)</strong> → <strong>Apps Script</strong>. <span className="text-red-700 font-semibold">Quan trọng: Tắt Google Dịch tự động trên trang Apps Script</span> (tránh trình duyệt dịch nhầm từ khóa code sang tiếng Việt).
               </li>
               <li>
-                Xóa hết mã mặc định trong <code className="font-mono">Code.gs</code>, bấm nút <strong>Sao chép mã Apps Script</strong> ở trên rồi dán vào và bấm lưu (Ctrl+S).
+                Xóa hết mã mặc định trong <code translate="no" className="notranslate font-mono">Code.gs</code>, bấm nút <strong>Sao chép mã Apps Script</strong> ở trên rồi dán vào và bấm lưu (<code translate="no" className="notranslate font-mono">Ctrl+S</code>).
               </li>
               <li>
                 Bấm <strong>Triển khai (Deploy) → Tùy chọn triển khai mới (New deployment) → Chọn loại: Ứng dụng web (Web app)</strong>:
-                mục <em>Thực thi dưới tên</em> chọn <strong>Tôi (Me)</strong>, mục <em>Ai có quyền truy cập</em> chọn <strong>Bất kỳ ai (Anyone)</strong> → bấm Triển khai, cấp quyền 1 lần và copy link <code className="font-mono">.../exec</code> dán vào ô phía trên.
+                mục <em>Thực thi dưới tên</em> chọn <strong>Tôi (Me)</strong>, mục <em>Ai có quyền truy cập</em> <strong>BẮT BUỘC chọn Bất kỳ ai (Anyone)</strong> → bấm Triển khai → bấm <strong>Cấp quyền truy cập</strong> (nếu hiện cảnh báo <em>&ldquo;Google chưa xác minh ứng dụng này&rdquo;</em> thì chọn <strong>Nâng cao (Advanced) → Đi tới ... (không an toàn) → Cho phép</strong>), rồi copy link <code translate="no" className="notranslate font-mono">.../exec</code> dán vào ô phía trên.
+              </li>
+              <li>
+                Nếu đã từng triển khai trước đó và vừa dán lại mã mới: vào <strong>Triển khai → Quản lý các bản triển khai → biểu tượng bút chì</strong> → mục <em>Phiên bản</em> chọn <strong>Phiên bản mới</strong> → kiểm tra <em>Ai có quyền truy cập</em> là <strong>Bất kỳ ai (Anyone)</strong> → bấm <strong>Triển khai</strong>.
               </li>
             </ol>
 
@@ -414,7 +432,10 @@ export function SettingsSyncPage({
               <summary className="cursor-pointer font-semibold text-zinc-700 hover:text-orange-600">
                 Xem trước đoạn mã Apps Script (Code.gs)
               </summary>
-              <pre className="mt-2 p-3 rounded-lg bg-zinc-900 text-zinc-100 font-mono text-[11px] overflow-x-auto max-h-60 leading-relaxed">
+              <pre
+                translate="no"
+                className="notranslate mt-2 p-3 rounded-lg bg-zinc-900 text-zinc-100 font-mono text-[11px] overflow-x-auto max-h-60 leading-relaxed"
+              >
                 {APPS_SCRIPT_CODE}
               </pre>
             </details>
@@ -589,7 +610,7 @@ export function SettingsSyncPage({
           <div className="p-3.5 rounded-lg bg-zinc-50 border border-zinc-200 space-y-1.5">
             <div className="font-bold text-zinc-900">2. Ghi ngược trực tiếp Google Sheets</div>
             <p className="text-zinc-600">
-              Khi đăng nhập Google, mỗi thay đổi đã xác nhận trên web đồng thời cập nhật <code className="font-mono">PHU TUNG KHO</code>, <code className="font-mono">Danh mục phụ tùng</code> và <code className="font-mono">THAM SO</code> để bảng tính và web luôn khớp số liệu tồn kho.
+              Khi bật Apps Script Webhook (không cần đăng nhập) hoặc OAuth, mỗi thay đổi đã xác nhận trên web đồng thời cập nhật <code translate="no" className="notranslate font-mono">PHU TUNG KHO</code>, <code translate="no" className="notranslate font-mono">Danh mục phụ tùng</code> và <code translate="no" className="notranslate font-mono">THAM SO</code> để bảng tính và web luôn khớp số liệu tồn kho.
             </p>
           </div>
           <div className="p-3.5 rounded-lg bg-zinc-50 border border-zinc-200 space-y-1.5">

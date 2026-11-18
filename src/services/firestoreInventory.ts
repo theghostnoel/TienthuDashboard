@@ -18,6 +18,7 @@ import type {
   TransactionType,
 } from '../types/inventory';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { getLocalTodayIso } from '../lib/format';
 import { formatIsoToDisplay } from '../lib/inventoryCalculator';
 
 const TX_COLLECTION = 'inventory_transactions';
@@ -385,7 +386,7 @@ export async function recordTransactionInFirestore(input: {
 
   const ngayIso = /^\d{4}-\d{2}-\d{2}$/.test(input.ngayGiaoDichIso)
     ? input.ngayGiaoDichIso
-    : new Date().toISOString().slice(0, 10);
+    : getLocalTodayIso();
   const ngayGiaoDich = formatIsoToDisplay(ngayIso);
 
   const txDocRef = doc(db, TX_COLLECTION, txId);
@@ -543,7 +544,7 @@ export async function saveThamSoOverrideInFirestore(
 export async function resetThamSoOverrideInFirestore(
   sheetBase: ThamSoConfig
 ): Promise<void> {
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = getLocalTodayIso();
   const docRef = doc(db, META_COLLECTION, 'tham_so_override');
   const payload = {
     active: false,

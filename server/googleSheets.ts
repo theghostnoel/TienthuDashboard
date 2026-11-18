@@ -216,7 +216,8 @@ export async function readGoogleSheetReferenceData(
     return undefined;
   };
 
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   const pTuNgay = findParam('từ ngày');
   const pDenNgay = findParam('đến ngày');
   const pSoNgay = findParam('số ngày của kỳ');
@@ -366,7 +367,10 @@ export async function forwardToAppsScriptWebhook(
     const res = await fetch(safeUrl, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'text/plain;charset=utf-8',
+        Accept: 'application/json, text/plain, */*',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       },
       body: JSON.stringify(payload),
       redirect: 'follow',
@@ -376,18 +380,38 @@ export async function forwardToAppsScriptWebhook(
     const text = await res.text();
     const trimmed = text.trim();
 
-    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+    if (res.status === 404) {
+      throw new Error(
+        'Link Apps Script không tồn tại hoặc đã bị xóa (HTTP 404). Hãy mở Apps Script -> Triển khai -> Quản lý các bản triển khai để copy đúng link /exec mới nhất.'
+      );
+    }
+
+    const isHtml =
+      trimmed.startsWith('<!DOCTYPE') ||
+      trimmed.startsWith('<html') ||
+      trimmed.startsWith('<HTML');
+
+    if (isHtml || res.status === 403 || res.status === 401) {
+      if (trimmed.includes('Script function not found')) {
+        throw new Error(
+          'Apps Script chưa có hàm doPost/doGet hợp lệ (hoặc bị lỗi cú pháp do bật Google Dịch). Hãy tắt Google Dịch, dán lại mã Code.gs chuẩn và Triển khai -> Phiên bản mới.'
+        );
+      }
       if (
+        res.status === 403 ||
+        res.status === 401 ||
         res.url.includes('accounts.google.com') ||
         trimmed.includes('Sign in') ||
-        trimmed.includes('Đăng nhập')
+        trimmed.includes('Đăng nhập') ||
+        trimmed.toLowerCase().includes('access') ||
+        trimmed.toLowerCase().includes('permission')
       ) {
         throw new Error(
-          'Apps Script chưa mở quyền truy cập "Anyone" (Bất kỳ ai). Hãy vào Deploy -> Manage deployments -> chọn Who has access: Anyone.'
+          'Apps Script bị từ chối truy cập (HTTP 403). Vui lòng kiểm tra trong Apps Script: Triển khai -> Quản lý các bản triển khai -> biểu tượng bút chì -> mục "Phiên bản" chọn "Phiên bản mới", mục "Thực thi dưới tên" chọn "Tôi", và mục "Ai có quyền truy cập" BẮT BUỘC chọn "Bất kỳ ai (Anyone)".'
         );
       }
       throw new Error(
-        `Apps Script trả về trang lỗi HTML (HTTP ${res.status}). Hãy kiểm tra lại mã Code.gs và triển khai lại Web app.`
+        `Apps Script trả về trang lỗi HTML (HTTP ${res.status}). Hãy tắt Google Dịch trên trang Apps Script, dán lại mã Code.gs và triển khai lại Web app.`
       );
     }
 
@@ -396,7 +420,7 @@ export async function forwardToAppsScriptWebhook(
       parsed = trimmed ? (JSON.parse(trimmed) as Record<string, unknown>) : {};
     } catch {
       throw new Error(
-        `Phản hồi từ Apps Script không hợp lệ: ${trimmed.slice(0, 120)}`
+        `Phản hồi từ Apps Script không hợp lệ (HTTP ${res.status}): ${trimmed.slice(0, 120)}`
       );
     }
 
