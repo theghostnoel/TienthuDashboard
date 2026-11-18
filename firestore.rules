@@ -1,0 +1,231 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidTx(data) {
+      return data.keys().hasAll([
+          'maGiaoDich',
+          'ngayGiaoDich',
+          'ngayIso',
+          'loaiGiaoDich',
+          'maPhuTung',
+          'soLuong',
+          'maNhaCungCap',
+          'nhanVienThucHien',
+          'maDonDatHang',
+          'ghiChu',
+          'clientRequestId',
+          'source',
+          'seq',
+          'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'maGiaoDich',
+          'ngayGiaoDich',
+          'ngayIso',
+          'loaiGiaoDich',
+          'maPhuTung',
+          'soLuong',
+          'donGiaGiaoDich',
+          'maNhaCungCap',
+          'nhanVienThucHien',
+          'maDonDatHang',
+          'ghiChu',
+          'clientRequestId',
+          'source',
+          'seq',
+          'createdAt'
+        ])
+        && data.maGiaoDich is string && data.maGiaoDich.size() >= 1 && data.maGiaoDich.size() <= 32 && data.maGiaoDich.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.ngayGiaoDich is string && data.ngayGiaoDich.size() >= 1 && data.ngayGiaoDich.size() <= 20
+        && data.ngayIso is string && data.ngayIso.size() == 10 && data.ngayIso.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.loaiGiaoDich in ['NHAP_NCC', 'XUAT_SUA_CHUA']
+        && data.maPhuTung is string && data.maPhuTung.size() >= 1 && data.maPhuTung.size() <= 32 && data.maPhuTung.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.soLuong is number && data.soLuong > 0 && data.soLuong <= 1000000
+        && (!('donGiaGiaoDich' in data) || data.donGiaGiaoDich == null || (data.donGiaGiaoDich is number && data.donGiaGiaoDich >= 0 && data.donGiaGiaoDich <= 1000000000))
+        && data.maNhaCungCap is string && data.maNhaCungCap.size() <= 64
+        && data.nhanVienThucHien is string && data.nhanVienThucHien.size() >= 1 && data.nhanVienThucHien.size() <= 100
+        && data.maDonDatHang is string && data.maDonDatHang.size() <= 64
+        && data.ghiChu is string && data.ghiChu.size() <= 500
+        && data.clientRequestId is string && data.clientRequestId.size() >= 1 && data.clientRequestId.size() <= 100 && data.clientRequestId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.source in ['GOOGLE_SHEET_SEED', 'WEB_APP']
+        && data.seq is number && data.seq >= 1 && data.seq <= 10000000
+        && data.createdAt == request.time;
+    }
+
+    function isValidCatalogPart(data, partId) {
+      return data.keys().hasAll([
+          'maPhuTung',
+          'tenPhuTung',
+          'donViTinh',
+          'dinhMucToiThieu',
+          'ghiChu',
+          'nhomPhuTung',
+          'giaNhapThamChieu',
+          'giaBanThamChieu',
+          'maNhaCungCapMacDinh',
+          'tonDauKy',
+          'slDangDatChuaNhan',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'maPhuTung',
+          'tenPhuTung',
+          'donViTinh',
+          'dinhMucToiThieu',
+          'ghiChu',
+          'nhomPhuTung',
+          'giaNhapThamChieu',
+          'giaBanThamChieu',
+          'maNhaCungCapMacDinh',
+          'leadTimeRieng',
+          'tonDauKy',
+          'slDangDatChuaNhan',
+          'updatedAt'
+        ])
+        && data.maPhuTung is string && data.maPhuTung.size() >= 1 && data.maPhuTung.size() <= 32 && data.maPhuTung.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.maPhuTung == partId
+        && data.tenPhuTung is string && data.tenPhuTung.size() >= 1 && data.tenPhuTung.size() <= 200
+        && data.donViTinh is string && data.donViTinh.size() >= 1 && data.donViTinh.size() <= 40
+        && data.dinhMucToiThieu is number && data.dinhMucToiThieu >= 0 && data.dinhMucToiThieu <= 1000000
+        && data.ghiChu is string && data.ghiChu.size() <= 500
+        && data.nhomPhuTung is string && data.nhomPhuTung.size() <= 120
+        && data.giaNhapThamChieu is number && data.giaNhapThamChieu >= 0 && data.giaNhapThamChieu <= 1000000000
+        && data.giaBanThamChieu is number && data.giaBanThamChieu >= 0 && data.giaBanThamChieu <= 1000000000
+        && data.maNhaCungCapMacDinh is string && data.maNhaCungCapMacDinh.size() <= 64
+        && (!('leadTimeRieng' in data) || data.leadTimeRieng == null || (data.leadTimeRieng is number && data.leadTimeRieng >= 0 && data.leadTimeRieng <= 365))
+        && data.tonDauKy is number && data.tonDauKy >= 0 && data.tonDauKy <= 1000000
+        && data.slDangDatChuaNhan is number && data.slDangDatChuaNhan >= 0 && data.slDangDatChuaNhan <= 1000000
+        && data.updatedAt == request.time;
+    }
+
+    function isValidSystemMetadata(data, metaKey) {
+      return data.updatedAt == request.time
+        && (
+          (metaKey == 'google_sheet_seed_v1'
+            && data.keys().hasAll(['initialized', 'seededCount', 'updatedAt'])
+            && data.keys().hasOnly(['initialized', 'seededCount', 'updatedAt'])
+            && data.initialized == true
+            && data.seededCount is number && data.seededCount >= 0 && data.seededCount <= 10000)
+          ||
+          (metaKey == 'tx_counter'
+            && data.keys().hasAll(['lastSeq', 'updatedAt'])
+            && data.keys().hasOnly(['lastSeq', 'updatedAt'])
+            && data.lastSeq is number && data.lastSeq >= 0 && data.lastSeq <= 10000000)
+          ||
+          (metaKey == 'tham_so_override'
+            && data.keys().hasAll([
+              'active',
+              'tuNgayIso',
+              'denNgayIso',
+              'ngayXemBaoCaoIso',
+              'leadTimeMacDinh',
+              'soNgayDuTruMongMuon',
+              'soNgayCanhBaoTruoc',
+              'updatedAt'
+            ])
+            && data.keys().hasOnly([
+              'active',
+              'tuNgayIso',
+              'denNgayIso',
+              'ngayXemBaoCaoIso',
+              'leadTimeMacDinh',
+              'soNgayDuTruMongMuon',
+              'soNgayCanhBaoTruoc',
+              'updatedAt'
+            ])
+            && data.active is bool
+            && data.tuNgayIso is string && data.tuNgayIso.size() == 10 && data.tuNgayIso.matches('^\\d{4}-\\d{2}-\\d{2}$')
+            && data.denNgayIso is string && data.denNgayIso.size() == 10 && data.denNgayIso.matches('^\\d{4}-\\d{2}-\\d{2}$')
+            && data.ngayXemBaoCaoIso is string && data.ngayXemBaoCaoIso.size() == 10 && data.ngayXemBaoCaoIso.matches('^\\d{4}-\\d{2}-\\d{2}$')
+            && data.leadTimeMacDinh is number && data.leadTimeMacDinh >= 0 && data.leadTimeMacDinh <= 365
+            && data.soNgayDuTruMongMuon is number && data.soNgayDuTruMongMuon >= 1 && data.soNgayDuTruMongMuon <= 365
+            && data.soNgayCanhBaoTruoc is number && data.soNgayCanhBaoTruoc >= 0 && data.soNgayCanhBaoTruoc <= 365)
+          ||
+          (metaKey == 'google_sheet_config'
+            && data.keys().hasAll(['spreadsheetId', 'updatedAt'])
+            && data.keys().hasOnly(['spreadsheetId', 'updatedAt'])
+            && data.spreadsheetId is string && data.spreadsheetId.size() >= 10 && data.spreadsheetId.size() <= 128 && data.spreadsheetId.matches('^[a-zA-Z0-9_\\-]+$'))
+        );
+    }
+
+    match /test/connection {
+      allow get: if true;
+      allow list, write: if false;
+    }
+
+    match /inventory_transactions/{txId} {
+      allow get, list: if true;
+      allow create: if isValidId(txId) && isValidTx(incoming());
+      allow update, delete: if false;
+    }
+
+    match /catalog_parts_custom/{partId} {
+      allow get, list: if true;
+      allow create: if isValidId(partId) && isValidCatalogPart(incoming(), partId);
+      allow update: if isValidId(partId)
+        && isValidCatalogPart(incoming(), partId)
+        && incoming().maPhuTung == existing().maPhuTung
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'tenPhuTung',
+          'donViTinh',
+          'dinhMucToiThieu',
+          'ghiChu',
+          'nhomPhuTung',
+          'giaNhapThamChieu',
+          'giaBanThamChieu',
+          'maNhaCungCapMacDinh',
+          'leadTimeRieng',
+          'tonDauKy',
+          'slDangDatChuaNhan',
+          'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    match /system_metadata/{metaKey} {
+      allow get: if metaKey in ['google_sheet_seed_v1', 'tx_counter', 'tham_so_override', 'google_sheet_config'];
+      allow list: if false;
+      allow create: if metaKey in ['google_sheet_seed_v1', 'tx_counter', 'tham_so_override', 'google_sheet_config'] && isValidSystemMetadata(incoming(), metaKey);
+      allow update: if (
+        (metaKey == 'tx_counter'
+          && isValidSystemMetadata(incoming(), metaKey)
+          && incoming().lastSeq >= existing().lastSeq
+          && incoming().diff(existing()).affectedKeys().hasOnly(['lastSeq', 'updatedAt']))
+        ||
+        (metaKey == 'tham_so_override'
+          && isValidSystemMetadata(incoming(), metaKey)
+          && incoming().diff(existing()).affectedKeys().hasOnly([
+            'active',
+            'tuNgayIso',
+            'denNgayIso',
+            'ngayXemBaoCaoIso',
+            'leadTimeMacDinh',
+            'soNgayDuTruMongMuon',
+            'soNgayCanhBaoTruoc',
+            'updatedAt'
+          ]))
+        ||
+        (metaKey == 'google_sheet_config'
+          && isValidSystemMetadata(incoming(), metaKey)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['spreadsheetId', 'updatedAt']))
+      );
+      allow delete: if false;
+    }
+  }
+}

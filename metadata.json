@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Quản lý Tồn kho Phụ tùng Tiến Thu",
+  "description": "Hệ thống quản lý tồn kho, tự động tính toán KPI và cảnh báo đặt hàng phụ tùng xe máy cho Trung tâm Dịch vụ \u0026 Bảo hành Tiến Thu.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

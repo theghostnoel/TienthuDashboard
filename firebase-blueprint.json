@@ -1,0 +1,236 @@
+{
+  "entities": {
+    "InventoryTransaction": {
+      "title": "InventoryTransaction",
+      "description": "Append-only inbound (NHAP_NCC) or outbound (XUAT_SUA_CHUA) spare parts transaction stored in Firestore.",
+      "type": "object",
+      "properties": {
+        "maGiaoDich": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "ngayGiaoDich": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "ngayIso": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "loaiGiaoDich": {
+          "type": "string",
+          "enum": ["NHAP_NCC", "XUAT_SUA_CHUA"]
+        },
+        "maPhuTung": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "soLuong": {
+          "type": "number"
+        },
+        "donGiaGiaoDich": {
+          "type": "number"
+        },
+        "maNhaCungCap": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "nhanVienThucHien": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "maDonDatHang": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "ghiChu": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "clientRequestId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "source": {
+          "type": "string",
+          "enum": ["GOOGLE_SHEET_SEED", "WEB_APP"]
+        },
+        "seq": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "maGiaoDich",
+        "ngayGiaoDich",
+        "ngayIso",
+        "loaiGiaoDich",
+        "maPhuTung",
+        "soLuong",
+        "maNhaCungCap",
+        "nhanVienThucHien",
+        "maDonDatHang",
+        "ghiChu",
+        "clientRequestId",
+        "source",
+        "seq",
+        "createdAt"
+      ]
+    },
+    "CatalogPartCustom": {
+      "title": "CatalogPartCustom",
+      "description": "Custom spare part addition or metadata override persisted in Firestore without altering the read-only Google Sheet.",
+      "type": "object",
+      "properties": {
+        "maPhuTung": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "tenPhuTung": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "donViTinh": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "dinhMucToiThieu": {
+          "type": "number"
+        },
+        "ghiChu": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "nhomPhuTung": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "giaNhapThamChieu": {
+          "type": "number"
+        },
+        "giaBanThamChieu": {
+          "type": "number"
+        },
+        "maNhaCungCapMacDinh": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "leadTimeRieng": {
+          "type": "number"
+        },
+        "tonDauKy": {
+          "type": "number"
+        },
+        "slDangDatChuaNhan": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "maPhuTung",
+        "tenPhuTung",
+        "donViTinh",
+        "dinhMucToiThieu",
+        "ghiChu",
+        "nhomPhuTung",
+        "giaNhapThamChieu",
+        "giaBanThamChieu",
+        "maNhaCungCapMacDinh",
+        "tonDauKy",
+        "slDangDatChuaNhan",
+        "updatedAt"
+      ]
+    },
+    "SystemMetadata": {
+      "title": "SystemMetadata",
+      "description": "Internal metadata tracking one-time Google Sheet seed completion, sequential transaction numbering, and operational THAM SO overrides.",
+      "type": "object",
+      "properties": {
+        "lastSeq": {
+          "type": "number"
+        },
+        "seededCount": {
+          "type": "number"
+        },
+        "initialized": {
+          "type": "boolean"
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "tuNgayIso": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "denNgayIso": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "ngayXemBaoCaoIso": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 10,
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "leadTimeMacDinh": {
+          "type": "number"
+        },
+        "soNgayDuTruMongMuon": {
+          "type": "number"
+        },
+        "soNgayCanhBaoTruoc": {
+          "type": "number"
+        },
+        "spreadsheetId": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["updatedAt"]
+    }
+  },
+  "firestore": {
+    "/inventory_transactions/{txId}": {
+      "schema": { "$ref": "#/entities/InventoryTransaction" },
+      "description": "Append-only ledger of all inventory inbound and outbound transactions synced across devices."
+    },
+    "/catalog_parts_custom/{partId}": {
+      "schema": { "$ref": "#/entities/CatalogPartCustom" },
+      "description": "Website-created spare parts and custom overrides merged on top of the read-only Google Sheet catalog."
+    },
+    "/system_metadata/{metaKey}": {
+      "schema": { "$ref": "#/entities/SystemMetadata" },
+      "description": "One-time Google Sheet seed marker (google_sheet_seed_v1), atomic transaction sequence counter (tx_counter), THAM SO override (tham_so_override), and synced Google Sheet ID config (google_sheet_config)."
+    }
+  }
+}
