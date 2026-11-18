@@ -159,8 +159,9 @@ service cloud.firestore {
           ||
           (metaKey == 'google_sheet_config'
             && data.keys().hasAll(['spreadsheetId', 'updatedAt'])
-            && data.keys().hasOnly(['spreadsheetId', 'updatedAt'])
-            && data.spreadsheetId is string && data.spreadsheetId.size() >= 10 && data.spreadsheetId.size() <= 128 && data.spreadsheetId.matches('^[a-zA-Z0-9_\\-]+$'))
+            && data.keys().hasOnly(['spreadsheetId', 'webhookUrl', 'updatedAt'])
+            && data.spreadsheetId is string && data.spreadsheetId.size() >= 10 && data.spreadsheetId.size() <= 128 && data.spreadsheetId.matches('^[a-zA-Z0-9_\\-]+$')
+            && (!('webhookUrl' in data) || data.webhookUrl == '' || (data.webhookUrl is string && data.webhookUrl.size() <= 512 && data.webhookUrl.matches('^https://script\\.google\\.com/macros/s/[a-zA-Z0-9_\\-]+/exec$'))))
         );
     }
 
@@ -223,7 +224,7 @@ service cloud.firestore {
         ||
         (metaKey == 'google_sheet_config'
           && isValidSystemMetadata(incoming(), metaKey)
-          && incoming().diff(existing()).affectedKeys().hasOnly(['spreadsheetId', 'updatedAt']))
+          && incoming().diff(existing()).affectedKeys().hasOnly(['spreadsheetId', 'webhookUrl', 'updatedAt']))
       );
       allow delete: if false;
     }

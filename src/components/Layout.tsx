@@ -4,7 +4,7 @@ import {
   BarChart3,
   Calculator,
   Database,
-  LogOut,
+  FileSpreadsheet,
   Menu,
   Package,
   RefreshCw,
@@ -13,9 +13,9 @@ import {
 } from 'lucide-react';
 import type { ConnectionSyncState } from '../types/inventory';
 import { formatDateTime } from '../lib/format';
-import { GoogleSignInButton } from './GoogleSignInButton';
 
 export type NavTab = 'dashboard' | 'parts' | 'transactions' | 'kpi' | 'settings';
+export type SheetsWriteMode = 'WEBHOOK' | 'OAUTH' | 'NONE';
 
 interface LayoutProps {
   activeTab: NavTab;
@@ -27,11 +27,7 @@ interface LayoutProps {
   onSyncNow: () => void;
   urgentCount: number;
   onQuickTransaction: () => void;
-  googleWriteConnected: boolean;
-  googleUserEmail: string | null;
-  googleAuthBusy: boolean;
-  onGoogleSignIn: () => void;
-  onGoogleSignOut: () => void;
+  sheetsWriteMode: SheetsWriteMode;
   children: React.ReactNode;
 }
 
@@ -78,11 +74,7 @@ export function Layout({
   onSyncNow,
   urgentCount,
   onQuickTransaction,
-  googleWriteConnected,
-  googleUserEmail,
-  googleAuthBusy,
-  onGoogleSignIn,
-  onGoogleSignOut,
+  sheetsWriteMode,
   children,
 }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -266,30 +258,27 @@ export function Layout({
               )}
             </div>
 
-            {googleWriteConnected ? (
-              <div className="h-9 px-2.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 text-xs font-semibold inline-flex items-center gap-2">
-                <span className="whitespace-nowrap">
-                  Sheets 2 chiều
-                  {googleUserEmail ? ` · ${googleUserEmail.split('@')[0]}` : ''}
-                </span>
-                <button
-                  type="button"
-                  onClick={onGoogleSignOut}
-                  className="p-1 rounded hover:bg-emerald-100 text-emerald-700"
-                  title="Ngắt kết nối ghi Google Sheets"
-                  aria-label="Đăng xuất Google"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ) : (
-              <GoogleSignInButton
-                compact
-                disabled={googleAuthBusy}
-                label={googleAuthBusy ? 'Đang kết nối...' : 'Sign in with Google'}
-                onClick={onGoogleSignIn}
-              />
-            )}
+            <button
+              type="button"
+              onClick={() => onTabChange('settings')}
+              className={`h-9 px-3 rounded-lg border text-xs font-semibold inline-flex items-center gap-1.5 transition-colors whitespace-nowrap ${
+                sheetsWriteMode !== 'NONE'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100/70'
+                  : 'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100/70'
+              }`}
+              title={
+                sheetsWriteMode !== 'NONE'
+                  ? 'Đang tự động cập nhật Google Sheets sau mọi thay đổi trên web'
+                  : 'Nhấn để bật tự động ghi ngược lên Google Sheets (không cần đăng nhập Google)'
+              }
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {sheetsWriteMode !== 'NONE'
+                  ? 'Sheets 2 chiều · Tự động'
+                  : 'Bật ghi Sheets tự động'}
+              </span>
+            </button>
 
             <button
               type="button"

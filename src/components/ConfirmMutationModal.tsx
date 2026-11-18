@@ -1,6 +1,6 @@
 import React from 'react';
 import { AlertTriangle, CheckCircle2, Info, X } from 'lucide-react';
-import { GoogleSignInButton } from './GoogleSignInButton';
+import type { SheetsWriteMode } from './Layout';
 
 export interface MutationConfirmDetails {
   title: string;
@@ -14,9 +14,7 @@ export interface MutationConfirmDetails {
 interface ConfirmMutationModalProps {
   pending: MutationConfirmDetails | null;
   busy: boolean;
-  googleWriteConnected: boolean;
-  googleAuthBusy: boolean;
-  onGoogleSignIn: () => void;
+  sheetsWriteMode: SheetsWriteMode;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -24,13 +22,13 @@ interface ConfirmMutationModalProps {
 export function ConfirmMutationModal({
   pending,
   busy,
-  googleWriteConnected,
-  googleAuthBusy,
-  onGoogleSignIn,
+  sheetsWriteMode,
   onConfirm,
   onCancel,
 }: ConfirmMutationModalProps) {
   if (!pending) return null;
+
+  const autoSheetsActive = sheetsWriteMode !== 'NONE';
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-zinc-950/60">
@@ -58,8 +56,8 @@ export function ConfirmMutationModal({
             <div className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider">
               Lưu trữ đích:{' '}
               <span className="font-mono text-zinc-800">
-                {googleWriteConnected
-                  ? `${pending.sheetName} + Google Sheets`
+                {autoSheetsActive && !pending.sheetName.includes('Google Sheets')
+                  ? `${pending.sheetName} + Google Sheets (Tự động)`
                   : pending.sheetName}
               </span>
             </div>
@@ -78,26 +76,12 @@ export function ConfirmMutationModal({
             </div>
           </div>
 
-          {!googleWriteConnected && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50/70 p-3 space-y-2 text-[11px] text-amber-900">
-              <div className="flex items-start gap-2">
-                <Info className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                <span>
-                  Bạn chưa đăng nhập Google để cấp quyền ghi trực tiếp lên Google Sheets. Nếu tiếp tục ngay, thay đổi chỉ lưu trên Firebase; hoặc nhấn nút bên dưới để kết nối Google Sheets trước khi lưu.
-                </span>
-              </div>
-              <div>
-                <GoogleSignInButton
-                  compact
-                  disabled={googleAuthBusy || busy}
-                  label={
-                    googleAuthBusy
-                      ? 'Đang kết nối...'
-                      : 'Sign in with Google để đồng bộ Sheets'
-                  }
-                  onClick={onGoogleSignIn}
-                />
-              </div>
+          {!autoSheetsActive && (
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 flex items-start gap-2 text-[11px] text-zinc-600">
+              <Info className="w-4 h-4 text-zinc-500 shrink-0 mt-0.5" />
+              <span>
+                Thay đổi hiện được lưu trên Firebase Firestore. Để tự động ghi ngược sang Google Sheets mà không cần đăng nhập Google, hãy bật Webhook Apps Script tại mục <strong>Firebase & Đồng bộ</strong>.
+              </span>
             </div>
           )}
 
@@ -127,3 +111,4 @@ export function ConfirmMutationModal({
     </div>
   );
 }
+

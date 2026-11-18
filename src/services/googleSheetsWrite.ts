@@ -565,3 +565,360 @@ export async function syncAllWebStateToGoogleSheet(params: {
     updatedThamSo,
   };
 }
+
+export const APPS_SCRIPT_CODE = `// Dán toàn bộ đoạn mã này vào: Tiện ích mở rộng -> Apps Script -> Lưu -> Triển khai (Web app -> Anyone)
+const TABS = {
+  CATALOG: 'Danh mục phụ tùng',
+  TRANSACTIONS: 'PHU TUNG KHO',
+  PARAMS: 'THAM SO',
+  INDICATORS: 'TINH CHI SO',
+};
+
+function jsonOut(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function parseIsoDate(iso) {
+  var m = String(iso || '').match(/^(\\d{4})-(\\d{2})-(\\d{2})$/);
+  if (!m) return iso || '';
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function appendTxInternal(ss, tx) {
+  var sheet = ss.getSheetByName(TABS.TRANSACTIONS);
+  if (!sheet) throw new Error('Không tìm thấy trang tính: ' + TABS.TRANSACTIONS);
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var existing = sheet.getRange(2, 1, lastRow - 1, 11).getValues();
+    for (var i = 0; i < existing.length; i++) {
+      var code = String(existing[i][0] || '').trim();
+      var reqId = String(existing[i][10] || '').trim();
+      if ((code && code === tx.maGiaoDich) || (tx.clientRequestId && reqId === tx.clientRequestId)) {
+        return false;
+      }
+    }
+  }
+
+  sheet.appendRow([
+    tx.maGiaoDich || '',
+    parseIsoDate(tx.ngayIso),
+    tx.loaiGiaoDich || 'XUAT_SUA_CHUA',
+    tx.maPhuTung || '',
+    Number(tx.soLuong || 0),
+    tx.donGiaGiaoDich !== null && tx.donGiaGiaoDich !== undefined && tx.donGiaGiaoDich !== '' ? Number(tx.donGiaGiaoDich) : '',
+    tx.maNhaCungCap || '',
+    tx.nhanVienThucHien || '',
+    tx.maDonDatHang || '',
+    tx.ghiChu || '',
+    tx.clientRequestId || ''
+  ]);
+  return true;
+}
+
+function ensureIndicatorRow(ss, maPhuTung, tenPhuTung) {
+  var sheet = ss.getSheetByName(TABS.INDICATORS);
+  if (!sheet) return;
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var colA = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < colA.length; i++) {
+      if (String(colA[i][0] || '').trim().toUpperCase() === maPhuTung.toUpperCase()) {
+        return;
+      }
+    }
+  }
+  var nextRow = Math.max(2, lastRow + 1);
+  sheet.getRange(nextRow, 1).setValue(maPhuTung);
+  if (lastRow >= 2) {
+    var formulas = sheet.getRange(2, 2, 1, 15).getFormulas()[0];
+    var hasFormula = formulas.some(function (f) { return f && f.indexOf('=') === 0; });
+    if (hasFormula) {
+      sheet.getRange(2, 2, 1, 15).copyTo(sheet.getRange(nextRow, 2, 1, 15));
+      return;
+    }
+  }
+  sheet.getRange(nextRow, 2).setValue(tenPhuTung || '');
+}
+
+function upsertPartInternal(ss, part) {
+  var sheet = ss.getSheetByName(TABS.CATALOG);
+  if (!sheet) throw new Error('Không tìm thấy trang tính: ' + TABS.CATALOG);
+
+  var rowValues = [
+    part.maPhuTung,
+    part.tenPhuTung,
+    part.donViTinh,
+    Number(part.dinhMucToiThieu || 0),
+    part.ghiChu || '',
+    part.nhomPhuTung || '',
+    Number(part.giaNhapThamChieu || 0),
+    Number(part.giaBanThamChieu || 0),
+    part.maNhaCungCapMacDinh || 'NCC001',
+    part.leadTimeRieng !== null && part.leadTimeRieng !== undefined && part.leadTimeRieng !== '' ? Number(part.leadTimeRieng) : '',
+    Number(part.tonDauKy || 0),
+    Number(part.slDangDatChuaNhan || 0)
+  ];
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var colA = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < colA.length; i++) {
+      if (String(colA[i][0] || '').trim().toUpperCase() === String(part.maPhuTung || '').toUpperCase()) {
+        sheet.getRange(i + 2, 1, 1, 12).setValues([rowValues]);
+        return 'updated';
+      }
+    }
+  }
+
+  sheet.appendRow(rowValues);
+  ensureIndicatorRow(ss, part.maPhuTung, part.tenPhuTung);
+  return 'appended';
+}
+
+function updateThamSoInternal(ss, thamSo) {
+  var sheet = ss.getSheetByName(TABS.PARAMS);
+  if (!sheet) throw new Error('Không tìm thấy trang tính: ' + TABS.PARAMS);
+  var lastRow = Math.max(8, sheet.getLastRow());
+  var labels = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+  var formulas = sheet.getRange(2, 2, lastRow - 1, 1).getFormulas();
+
+  for (var i = 0; i < labels.length; i++) {
+    var label = String(labels[i][0] || '').trim().toLowerCase();
+    var rowNum = i + 2;
+    if (!label) continue;
+    if (label.indexOf('từ ngày') !== -1) {
+      sheet.getRange(rowNum, 2).setValue(parseIsoDate(thamSo.tuNgayIso));
+    } else if (label.indexOf('đến ngày') !== -1) {
+      sheet.getRange(rowNum, 2).setValue(parseIsoDate(thamSo.denNgayIso));
+    } else if (label.indexOf('ngày xem báo cáo') !== -1 && !formulas[i][0]) {
+      sheet.getRange(rowNum, 2).setValue(parseIsoDate(thamSo.ngayXemBaoCaoIso));
+    } else if (label.indexOf('thời gian chờ') !== -1) {
+      sheet.getRange(rowNum, 2).setValue(Number(thamSo.leadTimeMacDinh || 0));
+    } else if (label.indexOf('đủ dùng thêm') !== -1) {
+      sheet.getRange(rowNum, 2).setValue(Number(thamSo.soNgayDuTruMongMuon || 30));
+    } else if (label.indexOf('cảnh báo trước') !== -1) {
+      sheet.getRange(rowNum, 2).setValue(Number(thamSo.soNgayCanhBaoTruoc || 7));
+    }
+  }
+}
+
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    var body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+    if (body.action === 'ping') {
+      return jsonOut({
+        ok: true,
+        spreadsheetId: ss.getId(),
+        spreadsheetName: ss.getName()
+      });
+    }
+
+    if (body.action === 'appendTransaction') {
+      var appended = appendTxInternal(ss, body.tx || {});
+      SpreadsheetApp.flush();
+      return jsonOut({ ok: true, appended: appended });
+    }
+
+    if (body.action === 'upsertCatalogPart') {
+      var res = upsertPartInternal(ss, body.part || {});
+      SpreadsheetApp.flush();
+      return jsonOut({ ok: true, action: res });
+    }
+
+    if (body.action === 'updateThamSo') {
+      updateThamSoInternal(ss, body.thamSo || {});
+      SpreadsheetApp.flush();
+      return jsonOut({ ok: true });
+    }
+
+    if (body.action === 'syncAll') {
+      var parts = body.parts || [];
+      var txs = body.transactions || [];
+      var syncedPartsCount = 0;
+      for (var p = 0; p < parts.length; p++) {
+        upsertPartInternal(ss, parts[p]);
+        syncedPartsCount++;
+      }
+      var addedTxCount = 0;
+      for (var t = 0; t < txs.length; t++) {
+        if (appendTxInternal(ss, txs[t])) addedTxCount++;
+      }
+      var updatedThamSo = false;
+      if (body.thamSo && body.thamSo.active) {
+        updateThamSoInternal(ss, body.thamSo);
+        updatedThamSo = true;
+      }
+      SpreadsheetApp.flush();
+      return jsonOut({
+        ok: true,
+        syncedPartsCount: syncedPartsCount,
+        addedTxCount: addedTxCount,
+        updatedThamSo: updatedThamSo
+      });
+    }
+
+    return jsonOut({ ok: false, error: 'Action không hỗ trợ: ' + body.action });
+  } catch (err) {
+    return jsonOut({ ok: false, error: err && err.message ? err.message : String(err) });
+  } finally {
+    lock.releaseLock();
+  }
+}`;
+
+async function callAppsScriptWebhook<T extends Record<string, unknown>>(
+  webhookUrl: string,
+  payload: Record<string, unknown>
+): Promise<T> {
+  const res = await fetch('/api/sheets/webhook', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ webhookUrl, payload }),
+  });
+  const text = await res.text();
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  } catch {
+    parsed = {};
+  }
+  if (!res.ok || parsed.ok === false) {
+    throw new Error(
+      typeof parsed.error === 'string' && parsed.error
+        ? parsed.error
+        : `Không thể đồng bộ Google Sheets qua Apps Script (HTTP ${res.status}).`
+    );
+  }
+  return parsed as T;
+}
+
+export async function pingAppsScriptWebhook(webhookUrl: string): Promise<{
+  ok: boolean;
+  spreadsheetId?: string;
+  spreadsheetName?: string;
+}> {
+  return callAppsScriptWebhook(webhookUrl, { action: 'ping' });
+}
+
+export async function appendTransactionViaWebhook(params: {
+  webhookUrl: string;
+  tx: {
+    maGiaoDich: string;
+    ngayIso: string;
+    loaiGiaoDich: 'NHAP_NCC' | 'XUAT_SUA_CHUA';
+    maPhuTung: string;
+    soLuong: number;
+    donGiaGiaoDich: number | null;
+    maNhaCungCap: string;
+    nhanVienThucHien: string;
+    maDonDatHang: string;
+    ghiChu: string;
+    clientRequestId?: string;
+  };
+}): Promise<void> {
+  await callAppsScriptWebhook(params.webhookUrl, {
+    action: 'appendTransaction',
+    tx: params.tx,
+  });
+}
+
+export async function upsertCatalogPartViaWebhook(params: {
+  webhookUrl: string;
+  part: {
+    maPhuTung: string;
+    tenPhuTung: string;
+    donViTinh: string;
+    dinhMucToiThieu: number;
+    ghiChu: string;
+    nhomPhuTung: string;
+    giaNhapThamChieu: number;
+    giaBanThamChieu: number;
+    maNhaCungCapMacDinh: string;
+    leadTimeRieng: number | null;
+    tonDauKy: number;
+    slDangDatChuaNhan: number;
+  };
+}): Promise<void> {
+  await callAppsScriptWebhook(params.webhookUrl, {
+    action: 'upsertCatalogPart',
+    part: params.part,
+  });
+}
+
+export async function updateThamSoViaWebhook(params: {
+  webhookUrl: string;
+  thamSo: Omit<ThamSoOverride, 'active'>;
+}): Promise<void> {
+  await callAppsScriptWebhook(params.webhookUrl, {
+    action: 'updateThamSo',
+    thamSo: params.thamSo,
+  });
+}
+
+export async function syncAllViaWebhook(params: {
+  webhookUrl: string;
+  items: MergedInventoryItem[];
+  transactions: SheetTransaction[];
+  thamSoOverride: ThamSoOverride | null;
+}): Promise<{
+  addedTxCount: number;
+  syncedPartsCount: number;
+  updatedThamSo: boolean;
+}> {
+  const partsToSync = params.items
+    .filter((it) => it.catalog.source === 'WEBSITE_DB')
+    .map((it) => ({
+      maPhuTung: it.catalog.maPhuTung,
+      tenPhuTung: it.catalog.tenPhuTung,
+      donViTinh: it.catalog.donViTinh,
+      dinhMucToiThieu: it.catalog.dinhMucToiThieu,
+      ghiChu: it.catalog.ghiChu,
+      nhomPhuTung: it.catalog.nhomPhuTung,
+      giaNhapThamChieu: it.catalog.giaNhapThamChieu,
+      giaBanThamChieu: it.catalog.giaBanThamChieu,
+      maNhaCungCapMacDinh: it.catalog.maNhaCungCapMacDinh,
+      leadTimeRieng: it.catalog.leadTimeRieng,
+      tonDauKy: it.catalog.tonDauKy,
+      slDangDatChuaNhan: it.catalog.slDangDatChuaNhan,
+    }));
+
+  const sortedTxs = [...params.transactions]
+    .sort((a, b) => (a.seq ?? a.rowIndex) - (b.seq ?? b.rowIndex))
+    .map((tx) => ({
+      maGiaoDich: tx.maGiaoDich,
+      ngayIso: tx.ngayIso,
+      loaiGiaoDich: tx.loaiGiaoDich,
+      maPhuTung: tx.maPhuTung,
+      soLuong: tx.soLuong,
+      donGiaGiaoDich: tx.donGiaGiaoDich,
+      maNhaCungCap: tx.maNhaCungCap,
+      nhanVienThucHien: tx.nhanVienThucHien,
+      maDonDatHang: tx.maDonDatHang,
+      ghiChu: tx.ghiChu,
+      clientRequestId: tx.clientRequestId,
+    }));
+
+  const res = await callAppsScriptWebhook<{
+    addedTxCount?: number;
+    syncedPartsCount?: number;
+    updatedThamSo?: boolean;
+  }>(params.webhookUrl, {
+    action: 'syncAll',
+    parts: partsToSync,
+    transactions: sortedTxs,
+    thamSo: params.thamSoOverride?.active ? params.thamSoOverride : null,
+  });
+
+  return {
+    addedTxCount: Number(res.addedTxCount ?? 0),
+    syncedPartsCount: Number(res.syncedPartsCount ?? 0),
+    updatedThamSo: Boolean(res.updatedThamSo),
+  };
+}
+

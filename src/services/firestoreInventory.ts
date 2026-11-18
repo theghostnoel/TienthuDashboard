@@ -175,11 +175,16 @@ export async function ensureInitialSeedFromSheet(
   }
 }
 
+export interface GoogleSheetConfigData {
+  spreadsheetId: string | null;
+  webhookUrl: string | null;
+}
+
 export function subscribeToInventoryCollections(params: {
   onTransactions: (txs: SheetTransaction[]) => void;
   onCustomParts: (parts: CatalogPart[]) => void;
   onThamSoOverride?: (override: ThamSoOverride | null) => void;
-  onGoogleSheetConfig?: (spreadsheetId: string | null) => void;
+  onGoogleSheetConfig?: (config: GoogleSheetConfigData) => void;
   onError: (err: Error) => void;
 }): () => void {
   const txQuery = query(collection(db, TX_COLLECTION), orderBy('seq', 'desc'));
@@ -307,7 +312,7 @@ export function subscribeToInventoryCollections(params: {
         doc(db, META_COLLECTION, 'google_sheet_config'),
         (snap) => {
           if (!snap.exists()) {
-            params.onGoogleSheetConfig?.(null);
+            params.onGoogleSheetConfig?.({ spreadsheetId: null, webhookUrl: null });
             return;
           }
           const data = snap.data();
@@ -316,7 +321,14 @@ export function subscribeToInventoryCollections(params: {
             /^[a-zA-Z0-9_-]{10,128}$/.test(data.spreadsheetId)
               ? data.spreadsheetId
               : null;
-          params.onGoogleSheetConfig?.(id);
+          const webhookUrl =
+            typeof data.webhookUrl === 'string' &&
+            /^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec$/.test(
+              data.webhookUrl
+            )
+              ? data.webhookUrl
+              : null;
+          params.onGoogleSheetConfig?.({ spreadsheetId: id, webhookUrl });
         },
         (err) => {
           try {
@@ -565,15 +577,26 @@ export async function resetThamSoOverrideInFirestore(
   }
 }
 
-export async function getSavedGoogleSheetIdFromFirestore(): Promise<string | null> {
+const WEBHOOK_URL_REGEX =
+  /^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec$/;
+
+export async function getSavedGoogleSheetConfigFromFirestore(): Promise<GoogleSheetConfigData> {
   const docRef = doc(db, META_COLLECTION, 'google_sheet_config');
   try {
     const snap = await getDoc(docRef);
-    if (!snap.exists()) return null;
-    const raw = snap.data().spreadsheetId;
-    return typeof raw === 'string' && /^[a-zA-Z0-9_-]{10,128}$/.test(raw)
-      ? raw
-      : null;
+    if (!snap.exists()) return { spreadsheetId: null, webhookUrl: null };
+    const data = snap.data();
+    const spreadsheetId =
+      typeof data.spreadsheetId === 'string' &&
+      /^[a-zA-Z0-9_-]{10,128}$/.test(data.spreadsheetId)
+        ? data.spreadsheetId
+        : null;
+    const webhookUrl =
+      typeof data.webhookUrl === 'string' &&
+      WEBHOOK_URL_REGEX.test(data.webhookUrl)
+        ? data.webhookUrl
+        : null;
+    return { spreadsheetId, webhookUrl };
   } catch (err) {
     handleFirestoreError(
       err,
@@ -592,10 +615,48 @@ export async function saveGoogleSheetIdInFirestore(
   }
   const docRef = doc(db, META_COLLECTION, 'google_sheet_config');
   try {
-    await setDoc(docRef, {
-      spreadsheetId: cleaned,
-      updatedAt: serverTimestamp(),
-    });
+    await setDoc(
+      docRef,
+      {
+        spreadsheetId: cleaned,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    handleFirestoreError(
+      err,
+      OperationType.WRITE,
+      `${META_COLLECTION}/google_sheet_config`
+    );
+  }
+}
+
+export async function saveGoogleWebhookUrlInFirestore(
+  spreadsheetId: string,
+  webhookUrl: string
+): Promise<void> {
+  const cleanedSheetId = spreadsheetId.trim();
+  if (!/^[a-zA-Z0-9_-]{10,128}$/.test(cleanedSheetId)) {
+    throw new Error('Spreadsheet ID không hợp lệ.');
+  }
+  const cleanedWebhook = webhookUrl.trim();
+  if (cleanedWebhook !== '' && !WEBHOOK_URL_REGEX.test(cleanedWebhook)) {
+    throw new Error(
+      'Link Apps Script phải có dạng https://script.google.com/macros/s/.../exec'
+    );
+  }
+  const docRef = doc(db, META_COLLECTION, 'google_sheet_config');
+  try {
+    await setDoc(
+      docRef,
+      {
+        spreadsheetId: cleanedSheetId,
+        webhookUrl: cleanedWebhook,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
   } catch (err) {
     handleFirestoreError(
       err,

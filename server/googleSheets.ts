@@ -340,3 +340,82 @@ export async function getReadOnlySheetBaselineState(
     transactions: ref.sheetInitialTransactions,
   });
 }
+
+const APPS_SCRIPT_EXEC_REGEX =
+  /^https:\/\/script\.google\.com\/macros\/s\/[a-zA-Z0-9_-]+\/exec$/;
+
+export function validateAppsScriptWebhookUrl(raw?: string | null): string {
+  const cleaned = (raw ?? '').trim();
+  if (!APPS_SCRIPT_EXEC_REGEX.test(cleaned)) {
+    throw new Error(
+      'Link Apps Script không hợp lệ. Link đúng có dạng: https://script.google.com/macros/s/.../exec'
+    );
+  }
+  return cleaned;
+}
+
+export async function forwardToAppsScriptWebhook(
+  webhookUrl: string,
+  payload: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  const safeUrl = validateAppsScriptWebhookUrl(webhookUrl);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+
+  try {
+    const res = await fetch(safeUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+
+    const text = await res.text();
+    const trimmed = text.trim();
+
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+      if (
+        res.url.includes('accounts.google.com') ||
+        trimmed.includes('Sign in') ||
+        trimmed.includes('Đăng nhập')
+      ) {
+        throw new Error(
+          'Apps Script chưa mở quyền truy cập "Anyone" (Bất kỳ ai). Hãy vào Deploy -> Manage deployments -> chọn Who has access: Anyone.'
+        );
+      }
+      throw new Error(
+        `Apps Script trả về trang lỗi HTML (HTTP ${res.status}). Hãy kiểm tra lại mã Code.gs và triển khai lại Web app.`
+      );
+    }
+
+    let parsed: Record<string, unknown> = {};
+    try {
+      parsed = trimmed ? (JSON.parse(trimmed) as Record<string, unknown>) : {};
+    } catch {
+      throw new Error(
+        `Phản hồi từ Apps Script không hợp lệ: ${trimmed.slice(0, 120)}`
+      );
+    }
+
+    if (!res.ok || parsed.ok === false) {
+      throw new Error(
+        typeof parsed.error === 'string' && parsed.error
+          ? parsed.error
+          : `Apps Script báo lỗi (HTTP ${res.status}).`
+      );
+    }
+
+    return parsed;
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Quá thời gian kết nối Apps Script (20 giây).');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+

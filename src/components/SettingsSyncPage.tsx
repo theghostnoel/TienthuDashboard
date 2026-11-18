@@ -2,7 +2,9 @@ import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   ArrowUpDown,
+  Check,
   CheckCircle2,
+  Copy,
   Database,
   ExternalLink,
   FileSpreadsheet,
@@ -20,11 +22,13 @@ import {
   formatReadableError,
   isMutationCancelledError,
 } from '../lib/format';
+import { APPS_SCRIPT_CODE } from '../services/googleSheetsWrite';
 import { GoogleSignInButton } from './GoogleSignInButton';
 
 interface SettingsSyncPageProps {
   state: SheetsStateResponse | null;
   configuredSheetId: string | null;
+  configuredWebhookUrl: string | null;
   googleWriteConnected: boolean;
   googleUserEmail: string | null;
   googleAuthBusy: boolean;
@@ -32,6 +36,7 @@ interface SettingsSyncPageProps {
   onGoogleSignOut: () => Promise<void>;
   onSyncNow: () => Promise<void>;
   onChangeGoogleSheet: (spreadsheetId: string) => Promise<void>;
+  onSaveWebhookUrl: (webhookUrl: string) => Promise<void>;
   onImportSheetTransactions: () => Promise<void>;
   onPushAllToGoogleSheet: () => Promise<void>;
 }
@@ -39,6 +44,7 @@ interface SettingsSyncPageProps {
 export function SettingsSyncPage({
   state,
   configuredSheetId,
+  configuredWebhookUrl,
   googleWriteConnected,
   googleUserEmail,
   googleAuthBusy,
@@ -46,14 +52,18 @@ export function SettingsSyncPage({
   onGoogleSignOut,
   onSyncNow,
   onChangeGoogleSheet,
+  onSaveWebhookUrl,
   onImportSheetTransactions,
   onPushAllToGoogleSheet,
 }: SettingsSyncPageProps) {
   const [busy, setBusy] = useState(false);
   const [savingLink, setSavingLink] = useState(false);
+  const [savingWebhook, setSavingWebhook] = useState(false);
   const [importingTx, setImportingTx] = useState(false);
   const [pushingToSheet, setPushingToSheet] = useState(false);
   const [linkInput, setLinkInput] = useState('');
+  const [webhookInput, setWebhookInput] = useState('');
+  const [copiedScript, setCopiedScript] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
   const [linkSuccess, setLinkSuccess] = useState<string | null>(null);
   const [twoWayMsg, setTwoWayMsg] = useState<{
@@ -71,7 +81,12 @@ export function SettingsSyncPage({
     setLinkInput(sheetUrl);
   }, [sheetUrl]);
 
+  useEffect(() => {
+    setWebhookInput(configuredWebhookUrl || '');
+  }, [configuredWebhookUrl]);
+
   const sys = state?.systemStatus;
+  const twoWayEnabled = Boolean(configuredWebhookUrl) || googleWriteConnected;
 
   const handleSync = async () => {
     setBusy(true);
@@ -112,6 +127,70 @@ export function SettingsSyncPage({
     }
   };
 
+  const handleSaveWebhook = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTwoWayMsg(null);
+    const trimmed = webhookInput.trim();
+    if (!trimmed) {
+      setTwoWayMsg({
+        type: 'error',
+        text: 'Vui lòng dán link Web App từ Google Apps Script (https://script.google.com/macros/s/.../exec).',
+      });
+      return;
+    }
+    setSavingWebhook(true);
+    try {
+      await onSaveWebhookUrl(trimmed);
+      setTwoWayMsg({
+        type: 'success',
+        text: 'Đã kết nối Apps Script thành công! Từ giờ mọi thao tác trên web sẽ tự động cập nhật Google Sheets mà không cần đăng nhập Google.',
+      });
+    } catch (err) {
+      setTwoWayMsg({
+        type: 'error',
+        text: formatReadableError(
+          err,
+          'Không thể kết nối Apps Script Webhook. Vui lòng kiểm tra lại link và quyền Anyone.'
+        ),
+      });
+    } finally {
+      setSavingWebhook(false);
+    }
+  };
+
+  const handleDisableWebhook = async () => {
+    setTwoWayMsg(null);
+    setSavingWebhook(true);
+    try {
+      await onSaveWebhookUrl('');
+      setWebhookInput('');
+      setTwoWayMsg({
+        type: 'success',
+        text: 'Đã tắt đồng bộ Apps Script Webhook.',
+      });
+    } catch (err) {
+      setTwoWayMsg({
+        type: 'error',
+        text: formatReadableError(err, 'Không thể tắt Webhook.'),
+      });
+    } finally {
+      setSavingWebhook(false);
+    }
+  };
+
+  const handleCopyScript = async () => {
+    try {
+      await navigator.clipboard.writeText(APPS_SCRIPT_CODE);
+      setCopiedScript(true);
+      window.setTimeout(() => setCopiedScript(false), 2500);
+    } catch {
+      setTwoWayMsg({
+        type: 'error',
+        text: 'Trình duyệt chặn sao chép tự động — bạn có thể mở khung mã bên dưới để copy thủ công.',
+      });
+    }
+  };
+
   const handleImportTx = async () => {
     setLinkError(null);
     setLinkSuccess(null);
@@ -147,8 +226,10 @@ export function SettingsSyncPage({
     }
   };
 
-  const sheetModeLabel = googleWriteConnected
-    ? 'Google Sheets API 2 chiều (Đọc & Ghi trực tiếp)'
+  const sheetModeLabel = configuredWebhookUrl
+    ? 'Google Sheets 2 chiều · Tự động không cần đăng nhập (Apps Script)'
+    : googleWriteConnected
+    ? 'Google Sheets API 2 chiều (OAuth)'
     : sys?.sheetsReadMode === 'SERVICE_ACCOUNT_RO'
     ? 'Google Sheets API Chỉ đọc (Service Account)'
     : 'Google Sheets Chỉ đọc công khai (gviz)';
@@ -161,7 +242,7 @@ export function SettingsSyncPage({
             Firebase Firestore & Đồng Bộ 2 Chiều Google Sheets
           </h1>
           <p className="text-xs sm:text-sm text-zinc-500 mt-0.5">
-            Đồng bộ đa thiết bị qua <strong>Firebase Firestore</strong> · Cập nhật trực tiếp lên <strong>Google Sheets</strong> khi đã kết nối tài khoản Google
+            Đồng bộ đa thiết bị qua <strong>Firebase Firestore</strong> · Cập nhật thẳng lên <strong>Google Sheets</strong> không cần đăng nhập khi bật Apps Script Webhook
           </p>
         </div>
 
@@ -187,71 +268,90 @@ export function SettingsSyncPage({
         </div>
       </div>
 
-      {/* 2-Way Google Sheets Write Sync Panel */}
+      {/* Zero-Login 2-Way Google Sheets Write Sync via Apps Script Webhook */}
       <div className="bg-white border border-zinc-200 rounded-xl p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-zinc-200 pb-3">
           <div className="flex items-center gap-2">
             <ArrowUpDown className="w-4 h-4 text-orange-600 shrink-0" />
             <h2 className="text-sm font-bold text-zinc-900">
-              Đồng bộ 2 chiều: Web & Firebase → Google Sheets
+              Đồng bộ tự động Web → Google Sheets (Không cần đăng nhập Google)
             </h2>
           </div>
           <span
             className={`px-2.5 py-0.5 rounded text-[11px] font-semibold border self-start sm:self-auto ${
-              googleWriteConnected
+              twoWayEnabled
                 ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
                 : 'bg-amber-50 border-amber-200 text-amber-800'
             }`}
           >
-            {googleWriteConnected ? 'Đã bật Ghi 2 chiều' : 'Đang ở chế độ Chỉ đọc Sheets'}
+            {configuredWebhookUrl
+              ? 'Đã bật tự động (Không cần đăng nhập)'
+              : googleWriteConnected
+              ? 'Đã bật qua Google OAuth'
+              : 'Chưa bật ghi ngược lên Sheets'}
           </span>
         </div>
 
-        <div className="text-xs text-zinc-600 leading-relaxed space-y-3">
+        <div className="text-xs text-zinc-600 leading-relaxed space-y-4">
           <p>
-            Khi đăng nhập tài khoản Google có quyền <strong>Chỉnh sửa (Editor)</strong> trên file Google Sheets, mọi phiếu <strong>Nhập/Xuất kho</strong> (<code className="font-mono">PHU TUNG KHO</code>), <strong>Thêm/Sửa phụ tùng</strong> (<code className="font-mono">Danh mục phụ tùng</code>) và <strong>Tham số</strong> (<code className="font-mono">THAM SO</code>) trên web sẽ tự động ghi thẳng vào Google Sheets, giúp cột <strong>Tồn hiện tại</strong> trên tab <code className="font-mono">TINH CHI SO</code> nhảy số khớp 100% với web.
+            Để nhân viên vào web sửa phụ tùng hay nhập/xuất kho là <strong>Google Sheets tự thay đổi theo ngay mà không phải bấm Sign in with Google</strong>, chủ file Google Sheet chỉ cần gắn cầu nối <strong>Google Apps Script</strong> bên dưới <strong>1 lần duy nhất</strong> (tự động lưu qua Firebase cho mọi máy).
           </p>
 
-          {googleWriteConnected ? (
+          <form onSubmit={handleSaveWebhook} className="space-y-2.5">
+            <label className="block font-semibold text-zinc-700">
+              Link Google Apps Script Web App (của file Google Sheet hiện tại)
+            </label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="url"
+                value={webhookInput}
+                onChange={(e) => setWebhookInput(e.target.value)}
+                placeholder="https://script.google.com/macros/s/.../exec"
+                className="flex-1 h-10 px-3 rounded-lg border border-zinc-200 font-mono text-xs text-zinc-900 focus:outline-none focus:border-orange-500"
+              />
+              <button
+                type="submit"
+                disabled={savingWebhook}
+                className="h-10 px-4 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-semibold whitespace-nowrap"
+              >
+                {savingWebhook
+                  ? 'Đang kiểm tra...'
+                  : 'Kiểm tra & Kích hoạt tự động'}
+              </button>
+              {configuredWebhookUrl && (
+                <button
+                  type="button"
+                  disabled={savingWebhook}
+                  onClick={handleDisableWebhook}
+                  className="h-10 px-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 font-semibold whitespace-nowrap"
+                >
+                  Tắt Webhook
+                </button>
+              )}
+            </div>
+          </form>
+
+          {twoWayEnabled && (
             <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-lg bg-emerald-50/70 border border-emerald-200">
               <div className="flex items-center gap-2 text-emerald-900 font-semibold">
                 <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
                 <span>
-                  Đang kết nối: <span className="font-mono">{googleUserEmail || 'Tài khoản Google'}</span>
+                  {configuredWebhookUrl
+                    ? 'Đang bật ghi tự động qua Apps Script — mọi máy thao tác trực tiếp không cần đăng nhập.'
+                    : `Đang kết nối Google OAuth (${googleUserEmail || 'Tài khoản Google'}).`}
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  disabled={pushingToSheet}
-                  onClick={handlePushAll}
-                  className="h-9 px-3.5 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-semibold inline-flex items-center gap-1.5"
-                >
-                  <UploadCloud className="w-3.5 h-3.5" />
-                  {pushingToSheet
-                    ? 'Đang đồng bộ...'
-                    : 'Đồng bộ toàn bộ Web → Google Sheets'}
-                </button>
-                <button
-                  type="button"
-                  onClick={onGoogleSignOut}
-                  className="h-9 px-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 font-semibold inline-flex items-center gap-1.5"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  Ngắt kết nối
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-lg bg-zinc-50 border border-zinc-200">
-              <div className="text-zinc-700">
-                Đăng nhập bằng tài khoản Google chủ sở hữu / Editor của file Google Sheets để bật đồng bộ ghi trực tiếp.
-              </div>
-              <GoogleSignInButton
-                disabled={googleAuthBusy}
-                label={googleAuthBusy ? 'Đang kết nối...' : 'Sign in with Google'}
-                onClick={onGoogleSignIn}
-              />
+              <button
+                type="button"
+                disabled={pushingToSheet}
+                onClick={handlePushAll}
+                className="h-9 px-3.5 rounded-lg bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-white font-semibold inline-flex items-center gap-1.5"
+              >
+                <UploadCloud className="w-3.5 h-3.5" />
+                {pushingToSheet
+                  ? 'Đang đồng bộ...'
+                  : 'Đồng bộ toàn bộ Web → Google Sheets'}
+              </button>
             </div>
           )}
 
@@ -271,6 +371,83 @@ export function SettingsSyncPage({
               <span>{twoWayMsg.text}</span>
             </div>
           )}
+
+          {/* 3-Step Apps Script Setup Box */}
+          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="font-bold text-zinc-900">
+                Hướng dẫn cài đặt 1 lần (1 phút) để khỏi cần Sign in with Google:
+              </div>
+              <button
+                type="button"
+                onClick={handleCopyScript}
+                className="h-8 px-3 rounded-lg border border-zinc-300 bg-white hover:bg-zinc-100 text-zinc-800 font-semibold inline-flex items-center gap-1.5"
+              >
+                {copiedScript ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span className="text-emerald-700">Đã sao chép Code.gs!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Sao chép mã Apps Script (Code.gs)</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <ol className="list-decimal list-inside space-y-1 text-zinc-700 text-[11px] leading-relaxed">
+              <li>
+                Mở file Google Sheets của bạn → chọn menu <strong>Tiện ích mở rộng (Extensions)</strong> → <strong>Apps Script</strong>.
+              </li>
+              <li>
+                Xóa hết mã mặc định trong <code className="font-mono">Code.gs</code>, bấm nút <strong>Sao chép mã Apps Script</strong> ở trên rồi dán vào và bấm lưu (Ctrl+S).
+              </li>
+              <li>
+                Bấm <strong>Triển khai (Deploy) → Tùy chọn triển khai mới (New deployment) → Chọn loại: Ứng dụng web (Web app)</strong>:
+                mục <em>Thực thi dưới tên</em> chọn <strong>Tôi (Me)</strong>, mục <em>Ai có quyền truy cập</em> chọn <strong>Bất kỳ ai (Anyone)</strong> → bấm Triển khai, cấp quyền 1 lần và copy link <code className="font-mono">.../exec</code> dán vào ô phía trên.
+              </li>
+            </ol>
+
+            <details className="text-[11px]">
+              <summary className="cursor-pointer font-semibold text-zinc-700 hover:text-orange-600">
+                Xem trước đoạn mã Apps Script (Code.gs)
+              </summary>
+              <pre className="mt-2 p-3 rounded-lg bg-zinc-900 text-zinc-100 font-mono text-[11px] overflow-x-auto max-h-60 leading-relaxed">
+                {APPS_SCRIPT_CODE}
+              </pre>
+            </details>
+          </div>
+
+          {/* Optional OAuth Fallback */}
+          <details className="rounded-lg border border-zinc-200 bg-white p-3 text-[11px]">
+            <summary className="cursor-pointer font-semibold text-zinc-600 hover:text-zinc-900">
+              Tùy chọn dự phòng: Kết nối bằng tài khoản Google (OAuth)
+            </summary>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-zinc-100">
+              <div className="text-zinc-600 max-w-xl">
+                Chỉ dùng nếu không muốn cài Apps Script (lưu ý domain web cần được thêm vào Authorized Domains trong Firebase Authentication).
+              </div>
+              {googleWriteConnected ? (
+                <button
+                  type="button"
+                  onClick={onGoogleSignOut}
+                  className="h-9 px-3 rounded-lg border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 font-semibold inline-flex items-center gap-1.5"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  Ngắt OAuth ({googleUserEmail || 'Google'})
+                </button>
+              ) : (
+                <GoogleSignInButton
+                  compact
+                  disabled={googleAuthBusy}
+                  label={googleAuthBusy ? 'Đang kết nối...' : 'Sign in with Google'}
+                  onClick={onGoogleSignIn}
+                />
+              )}
+            </div>
+          </details>
         </div>
       </div>
 
@@ -362,13 +539,13 @@ export function SettingsSyncPage({
         <div className="bg-white border border-zinc-200 rounded-xl p-4 space-y-2.5">
           <div className="flex items-center gap-2 text-xs font-bold text-zinc-700">
             <FileSpreadsheet className="w-4 h-4 text-orange-600" />
-            Google Sheets ({googleWriteConnected ? '2 Chiều' : 'Chỉ đọc'})
+            Google Sheets ({twoWayEnabled ? '2 Chiều' : 'Chỉ đọc'})
           </div>
           <div className="text-xs text-zinc-800 font-semibold">{sheetModeLabel}</div>
           <div className="text-[11px] text-zinc-500 leading-relaxed">
-            {googleWriteConnected
-              ? 'Mọi thay đổi trên web được ghi trực tiếp lên Google Sheets và cập nhật tồn kho tự động.'
-              : 'Đọc Danh mục phụ tùng, THAM SO và nạp dữ liệu nền ban đầu vào Firestore. Kết nối Google để bật ghi ngược lên Sheets.'}
+            {twoWayEnabled
+              ? 'Mọi thay đổi trên web được ghi tự động lên Google Sheets và cập nhật tồn kho khớp 100%.'
+              : 'Đọc Danh mục phụ tùng, THAM SO và nạp dữ liệu nền ban đầu vào Firestore. Bật Apps Script Webhook phía trên để ghi ngược tự động không cần đăng nhập.'}
           </div>
         </div>
 

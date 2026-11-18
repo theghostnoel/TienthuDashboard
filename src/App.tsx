@@ -18,18 +18,19 @@ import type {
 import { api } from './services/api';
 import {
   ensureInitialSeedFromSheet,
-  getSavedGoogleSheetIdFromFirestore,
+  getSavedGoogleSheetConfigFromFirestore,
   recordTransactionInFirestore,
   resetThamSoOverrideInFirestore,
   saveCatalogPartInFirestore,
   saveGoogleSheetIdInFirestore,
+  saveGoogleWebhookUrlInFirestore,
   saveThamSoOverrideInFirestore,
   subscribeToInventoryCollections,
   syncMissingSheetTransactionsToFirestore,
 } from './services/firestoreInventory';
 import { firebaseMetadata } from './lib/firebase';
 import { buildFullInventoryState, mergeThamSo } from './lib/inventoryCalculator';
-import { Layout, type NavTab } from './components/Layout';
+import { Layout, type NavTab, type SheetsWriteMode } from './components/Layout';
 import { DashboardPage } from './components/DashboardPage';
 import { PartsPage } from './components/PartsPage';
 import { TransactionsPage } from './components/TransactionsPage';
@@ -53,10 +54,15 @@ import {
 } from './lib/googleAuth';
 import {
   appendTransactionToGoogleSheet,
+  appendTransactionViaWebhook,
   GoogleSheetsAuthExpiredError,
+  pingAppsScriptWebhook,
+  syncAllViaWebhook,
   syncAllWebStateToGoogleSheet,
   updateThamSoInGoogleSheet,
+  updateThamSoViaWebhook,
   upsertCatalogPartInGoogleSheet,
+  upsertCatalogPartViaWebhook,
 } from './services/googleSheetsWrite';
 
 const SHEET_REFRESH_MS = 30_000;
@@ -77,6 +83,7 @@ export default function App() {
   const [firestoreCustomParts, setFirestoreCustomParts] = useState<CatalogPart[]>([]);
   const [thamSoOverride, setThamSoOverride] = useState<ThamSoOverride | null>(null);
   const [configuredSheetId, setConfiguredSheetId] = useState<string | null>(null);
+  const [configuredWebhookUrl, setConfiguredWebhookUrl] = useState<string | null>(null);
   const [seedReady, setSeedReady] = useState(false);
 
   const [loading, setLoading] = useState(true);
@@ -106,9 +113,15 @@ export default function App() {
   const inFlightRef = useRef(false);
   const seededOnceRef = useRef(false);
   const configuredSheetIdRef = useRef<string | null>(null);
+  const configuredWebhookUrlRef = useRef<string | null>(null);
   const loadedSheetIdRef = useRef<string | null>(null);
 
   const googleWriteConnected = Boolean(googleToken);
+  const sheetsWriteMode: SheetsWriteMode = configuredWebhookUrl
+    ? 'WEBHOOK'
+    : googleWriteConnected
+    ? 'OAUTH'
+    : 'NONE';
 
   const syncSheetReference = useCallback(
     async (silent = false, explicitSheetId?: string | null) => {
@@ -123,12 +136,16 @@ export default function App() {
             ? explicitSheetId
             : configuredSheetIdRef.current;
 
-        if (!targetSheetId) {
-          const savedId = await getSavedGoogleSheetIdFromFirestore();
-          if (savedId) {
-            targetSheetId = savedId;
-            configuredSheetIdRef.current = savedId;
-            setConfiguredSheetId(savedId);
+        if (!targetSheetId || !configuredWebhookUrlRef.current) {
+          const savedCfg = await getSavedGoogleSheetConfigFromFirestore();
+          if (!targetSheetId && savedCfg.spreadsheetId) {
+            targetSheetId = savedCfg.spreadsheetId;
+            configuredSheetIdRef.current = savedCfg.spreadsheetId;
+            setConfiguredSheetId(savedCfg.spreadsheetId);
+          }
+          if (savedCfg.webhookUrl !== null) {
+            configuredWebhookUrlRef.current = savedCfg.webhookUrl;
+            setConfiguredWebhookUrl(savedCfg.webhookUrl);
           }
         }
 
@@ -175,9 +192,11 @@ export default function App() {
       onThamSoOverride: (override) => {
         setThamSoOverride(override);
       },
-      onGoogleSheetConfig: (sheetId) => {
+      onGoogleSheetConfig: ({ spreadsheetId: sheetId, webhookUrl }) => {
         configuredSheetIdRef.current = sheetId;
         setConfiguredSheetId(sheetId);
+        configuredWebhookUrlRef.current = webhookUrl;
+        setConfiguredWebhookUrl(webhookUrl);
         if (
           sheetId &&
           loadedSheetIdRef.current &&
@@ -228,6 +247,11 @@ export default function App() {
           type: 'warning',
           text: 'Bạn đã đóng cửa sổ đăng nhập Google trước khi cấp quyền Google Sheets.',
         });
+      } else if (msg.includes('auth/unauthorized-domain')) {
+        setToast({
+          type: 'warning',
+          text: `Tên miền "${window.location.hostname}" chưa có trong Authorized Domains của Firebase Auth. Khuyên dùng Apps Script Webhook trong mục "Firebase & Đồng bộ" để đồng bộ tự động mà không cần đăng nhập Google.`,
+        });
       } else {
         setToast({
           type: 'error',
@@ -247,7 +271,7 @@ export default function App() {
       setGoogleUserEmail(null);
       setToast({
         type: 'warning',
-        text: 'Đã ngắt kết nối ghi Google Sheets. Thay đổi mới sẽ chỉ lưu trên Firebase cho đến khi đăng nhập lại.',
+        text: 'Đã ngắt kết nối Google OAuth.',
       });
     } catch (err) {
       setToast({
@@ -270,20 +294,43 @@ export default function App() {
   const trySyncToGoogleSheet = useCallback(
     async (
       successLabel: string,
-      sheetTask: (spreadsheetId: string, accessToken: string) => Promise<void>
+      handlers: {
+        viaWebhook: (webhookUrl: string) => Promise<void>;
+        viaOAuth: (spreadsheetId: string, accessToken: string) => Promise<void>;
+      }
     ) => {
+      const webhookUrl = configuredWebhookUrlRef.current || configuredWebhookUrl;
+      if (webhookUrl) {
+        try {
+          await handlers.viaWebhook(webhookUrl);
+          await syncSheetReference(true);
+          setToast({
+            type: 'success',
+            text: `${successLabel} trên Firebase Firestore & đã tự động cập nhật Google Sheets.`,
+          });
+        } catch (err) {
+          setToast({
+            type: 'warning',
+            text: `${successLabel} trên Firebase Firestore, nhưng chưa cập nhật được Google Sheets qua Webhook: ${formatReadableError(
+              err
+            )}`,
+          });
+        }
+        return;
+      }
+
       const token = getGoogleAccessToken();
       if (!token) {
         setToast({
-          type: 'warning',
-          text: `${successLabel} trên Firebase Firestore. Hãy nhấn "Sign in with Google" để tự động ghi đồng bộ sang Google Sheets.`,
+          type: 'success',
+          text: `${successLabel} trên Firebase Firestore.`,
         });
         return;
       }
 
       const spreadsheetId = getEffectiveSpreadsheetId();
       try {
-        await sheetTask(spreadsheetId, token);
+        await handlers.viaOAuth(spreadsheetId, token);
         await syncSheetReference(true);
         setToast({
           type: 'success',
@@ -294,7 +341,7 @@ export default function App() {
           setGoogleToken(null);
           setToast({
             type: 'warning',
-            text: `${successLabel} trên Firebase Firestore, nhưng phiên Google Sheets đã hết hạn. Vui lòng nhấn "Sign in with Google" rồi đồng bộ lại.`,
+            text: `${successLabel} trên Firebase Firestore, nhưng phiên OAuth Google đã hết hạn.`,
           });
         } else {
           setToast({
@@ -306,7 +353,7 @@ export default function App() {
         }
       }
     },
-    [getEffectiveSpreadsheetId, syncSheetReference]
+    [configuredWebhookUrl, getEffectiveSpreadsheetId, syncSheetReference]
   );
 
   // Periodically refresh read-only Google Sheets catalog/THAM SO when tab is visible
@@ -461,11 +508,7 @@ export default function App() {
         setTxPreselectedMode('XUAT_SUA_CHUA');
         setActiveTab('transactions');
       }}
-      googleWriteConnected={googleWriteConnected}
-      googleUserEmail={googleUserEmail}
-      googleAuthBusy={googleAuthBusy}
-      onGoogleSignIn={handleGoogleSignIn}
-      onGoogleSignOut={handleGoogleSignOut}
+      sheetsWriteMode={sheetsWriteMode}
     >
       {/* Connection Error Banner when cached state exists */}
       {loadError && (
@@ -533,11 +576,12 @@ export default function App() {
             const existingPart = state.items.find(
               (it) => it.catalog.maPhuTung === maPhuTung
             );
+            const autoWrite = sheetsWriteMode !== 'NONE';
             return runWithConfirmation(
               {
                 title: 'Xác nhận cập nhật thông tin phụ tùng',
-                description: googleWriteConnected
-                  ? 'Thông tin chỉnh sửa sẽ được lưu vào Firebase Firestore và cập nhật trực tiếp lên tab "Danh mục phụ tùng" trên Google Sheets.'
+                description: autoWrite
+                  ? 'Thông tin chỉnh sửa sẽ được lưu vào Firebase Firestore và tự động cập nhật lên tab "Danh mục phụ tùng" trên Google Sheets.'
                   : 'Thông tin chỉnh sửa sẽ được lưu vào Firebase Firestore và đồng bộ tức thì tới mọi thiết bị.',
                 sheetName: 'Firebase Firestore (catalog_parts_custom)',
                 details: [
@@ -547,10 +591,10 @@ export default function App() {
                   { label: 'Giá nhập tham chiếu', value: formatCurrency(payload.giaNhapThamChieu) },
                   { label: 'Giá bán tham chiếu', value: formatCurrency(payload.giaBanThamChieu) },
                 ],
-                confirmLabel: googleWriteConnected
+                confirmLabel: autoWrite
                   ? 'Xác nhận lưu & cập nhật Sheets'
                   : 'Xác nhận lưu vào Firebase',
-                willWriteGoogleSheet: googleWriteConnected,
+                willWriteGoogleSheet: autoWrite,
               },
               async () => {
                 setSyncState('SYNCING');
@@ -577,12 +621,16 @@ export default function App() {
                   setSyncState('CONNECTED_RW');
                   await trySyncToGoogleSheet(
                     `Đã lưu cập nhật phụ tùng ${maPhuTung}`,
-                    async (spreadsheetId, accessToken) => {
-                      await upsertCatalogPartInGoogleSheet({
-                        spreadsheetId,
-                        accessToken,
-                        part: partPayload,
-                      });
+                    {
+                      viaWebhook: (webhookUrl) =>
+                        upsertCatalogPartViaWebhook({ webhookUrl, part: partPayload }),
+                      viaOAuth: async (spreadsheetId, accessToken) => {
+                        await upsertCatalogPartInGoogleSheet({
+                          spreadsheetId,
+                          accessToken,
+                          part: partPayload,
+                        });
+                      },
                     }
                   );
                 } catch (err) {
@@ -597,11 +645,12 @@ export default function App() {
               (it) =>
                 it.catalog.maPhuTung.toUpperCase() === payload.maPhuTung.trim().toUpperCase()
             );
+            const autoWrite = sheetsWriteMode !== 'NONE';
             return runWithConfirmation(
               {
                 title: 'Xác nhận thêm phụ tùng mới',
-                description: googleWriteConnected
-                  ? 'Phụ tùng mới sẽ được lưu vào Firebase Firestore và thêm trực tiếp vào tab "Danh mục phụ tùng" + "TINH CHI SO" trên Google Sheets.'
+                description: autoWrite
+                  ? 'Phụ tùng mới sẽ được lưu vào Firebase Firestore và tự động thêm vào tab "Danh mục phụ tùng" + "TINH CHI SO" trên Google Sheets.'
                   : 'Phụ tùng mới sẽ được lưu vào Firebase Firestore để theo dõi tồn kho trên mọi thiết bị.',
                 sheetName: 'Firebase Firestore (catalog_parts_custom)',
                 details: [
@@ -611,10 +660,10 @@ export default function App() {
                   { label: 'Giá nhập TK', value: formatCurrency(payload.giaNhapThamChieu) },
                   { label: 'Tồn đầu kỳ', value: String(payload.tonDauKy) },
                 ],
-                confirmLabel: googleWriteConnected
+                confirmLabel: autoWrite
                   ? 'Xác nhận thêm & cập nhật Sheets'
                   : 'Xác nhận thêm vào Firebase',
-                willWriteGoogleSheet: googleWriteConnected,
+                willWriteGoogleSheet: autoWrite,
               },
               async () => {
                 if (exists) {
@@ -644,12 +693,16 @@ export default function App() {
                   setSyncState('CONNECTED_RW');
                   await trySyncToGoogleSheet(
                     `Đã thêm phụ tùng ${normalizedCode}`,
-                    async (spreadsheetId, accessToken) => {
-                      await upsertCatalogPartInGoogleSheet({
-                        spreadsheetId,
-                        accessToken,
-                        part: partPayload,
-                      });
+                    {
+                      viaWebhook: (webhookUrl) =>
+                        upsertCatalogPartViaWebhook({ webhookUrl, part: partPayload }),
+                      viaOAuth: async (spreadsheetId, accessToken) => {
+                        await upsertCatalogPartInGoogleSheet({
+                          spreadsheetId,
+                          accessToken,
+                          part: partPayload,
+                        });
+                      },
                     }
                   );
                 } catch (err) {
@@ -668,12 +721,13 @@ export default function App() {
           searchQuery={searchQuery}
           preselectedPartCode={txPreselectedPart}
           preselectedMode={txPreselectedMode}
-          onInbound={(payload) =>
-            runWithConfirmation(
+          onInbound={(payload) => {
+            const autoWrite = sheetsWriteMode !== 'NONE';
+            return runWithConfirmation(
               {
                 title: 'Xác nhận lưu phiếu Nhập kho (NHAP_NCC)',
-                description: googleWriteConnected
-                  ? 'Phiếu nhập sẽ được lưu vào Firebase Firestore và ghi thêm dòng mới vào tab "PHU TUNG KHO" trên Google Sheets để cột Tồn hiện tại tự cập nhật.'
+                description: autoWrite
+                  ? 'Phiếu nhập sẽ được lưu vào Firebase Firestore và tự động ghi dòng mới vào tab "PHU TUNG KHO" trên Google Sheets để cột Tồn hiện tại cập nhật.'
                   : 'Phiếu nhập sẽ được lưu vĩnh viễn vào Firebase Firestore, đồng bộ tức thì tới mọi thiết bị và tự động tính lại chỉ số tồn kho.',
                 sheetName: 'Firebase Firestore (inventory_transactions)',
                 details: [
@@ -684,10 +738,10 @@ export default function App() {
                   { label: 'Nhà cung cấp', value: payload.maNhaCungCap },
                   { label: 'Người thực hiện', value: payload.nhanVienThucHien },
                 ],
-                confirmLabel: googleWriteConnected
+                confirmLabel: autoWrite
                   ? 'Xác nhận lưu & ghi Google Sheets'
                   : 'Xác nhận lưu phiếu nhập',
-                willWriteGoogleSheet: googleWriteConnected,
+                willWriteGoogleSheet: autoWrite,
               },
               async () => {
                 setSyncState('SYNCING');
@@ -705,26 +759,31 @@ export default function App() {
                     clientRequestId: payload.clientRequestId,
                   });
                   setSyncState('CONNECTED_RW');
+                  const txForSheet = {
+                    maGiaoDich: res.transactionCode,
+                    ngayIso: payload.ngayGiaoDichIso,
+                    loaiGiaoDich: 'NHAP_NCC' as const,
+                    maPhuTung: payload.maPhuTung,
+                    soLuong: payload.soLuong,
+                    donGiaGiaoDich: payload.donGia,
+                    maNhaCungCap: payload.maNhaCungCap,
+                    nhanVienThucHien: payload.nhanVienThucHien,
+                    maDonDatHang: payload.maDonDatHang || '',
+                    ghiChu: payload.ghiChu || '',
+                    clientRequestId: payload.clientRequestId,
+                  };
                   await trySyncToGoogleSheet(
                     `Đã lưu phiếu nhập ${res.transactionCode}`,
-                    async (spreadsheetId, accessToken) => {
-                      await appendTransactionToGoogleSheet({
-                        spreadsheetId,
-                        accessToken,
-                        tx: {
-                          maGiaoDich: res.transactionCode,
-                          ngayIso: payload.ngayGiaoDichIso,
-                          loaiGiaoDich: 'NHAP_NCC',
-                          maPhuTung: payload.maPhuTung,
-                          soLuong: payload.soLuong,
-                          donGiaGiaoDich: payload.donGia,
-                          maNhaCungCap: payload.maNhaCungCap,
-                          nhanVienThucHien: payload.nhanVienThucHien,
-                          maDonDatHang: payload.maDonDatHang || '',
-                          ghiChu: payload.ghiChu || '',
-                          clientRequestId: payload.clientRequestId,
-                        },
-                      });
+                    {
+                      viaWebhook: (webhookUrl) =>
+                        appendTransactionViaWebhook({ webhookUrl, tx: txForSheet }),
+                      viaOAuth: async (spreadsheetId, accessToken) => {
+                        await appendTransactionToGoogleSheet({
+                          spreadsheetId,
+                          accessToken,
+                          tx: txForSheet,
+                        });
+                      },
                     }
                   );
                   return res;
@@ -733,17 +792,18 @@ export default function App() {
                   throw err;
                 }
               }
-            )
-          }
+            );
+          }}
           onOutbound={(payload) => {
             const targetItem = state.items.find(
               (it) => it.catalog.maPhuTung === payload.maPhuTung
             );
+            const autoWrite = sheetsWriteMode !== 'NONE';
             return runWithConfirmation(
               {
                 title: 'Xác nhận lưu phiếu Xuất kho (XUAT_SUA_CHUA)',
-                description: googleWriteConnected
-                  ? 'Phiếu xuất sẽ được lưu vào Firebase Firestore và ghi thêm dòng mới vào tab "PHU TUNG KHO" trên Google Sheets để tồn kho trên Sheets cập nhật khớp với web.'
+                description: autoWrite
+                  ? 'Phiếu xuất sẽ được lưu vào Firebase Firestore và tự động ghi dòng mới vào tab "PHU TUNG KHO" trên Google Sheets để tồn kho trên Sheets cập nhật khớp với web.'
                   : 'Phiếu xuất sẽ được lưu vĩnh viễn vào Firebase Firestore, đồng bộ tức thì tới mọi thiết bị và tự động tính lại số ngày tồn kho.',
                 sheetName: 'Firebase Firestore (inventory_transactions)',
                 details: [
@@ -755,10 +815,10 @@ export default function App() {
                     ? [{ label: 'Ghi chú', value: payload.ghiChu }]
                     : []),
                 ],
-                confirmLabel: googleWriteConnected
+                confirmLabel: autoWrite
                   ? 'Xác nhận lưu & ghi Google Sheets'
                   : 'Xác nhận lưu phiếu xuất',
-                willWriteGoogleSheet: googleWriteConnected,
+                willWriteGoogleSheet: autoWrite,
               },
               async () => {
                 setSyncState('SYNCING');
@@ -776,26 +836,31 @@ export default function App() {
                     availableStock: targetItem?.indicator.tonHienTai,
                   });
                   setSyncState('CONNECTED_RW');
+                  const txForSheet = {
+                    maGiaoDich: res.transactionCode,
+                    ngayIso: payload.ngayGiaoDichIso,
+                    loaiGiaoDich: 'XUAT_SUA_CHUA' as const,
+                    maPhuTung: payload.maPhuTung,
+                    soLuong: payload.soLuong,
+                    donGiaGiaoDich: null,
+                    maNhaCungCap: '',
+                    nhanVienThucHien: payload.nhanVienThucHien,
+                    maDonDatHang: '',
+                    ghiChu: payload.ghiChu || '',
+                    clientRequestId: payload.clientRequestId,
+                  };
                   await trySyncToGoogleSheet(
                     `Đã lưu phiếu xuất ${res.transactionCode}`,
-                    async (spreadsheetId, accessToken) => {
-                      await appendTransactionToGoogleSheet({
-                        spreadsheetId,
-                        accessToken,
-                        tx: {
-                          maGiaoDich: res.transactionCode,
-                          ngayIso: payload.ngayGiaoDichIso,
-                          loaiGiaoDich: 'XUAT_SUA_CHUA',
-                          maPhuTung: payload.maPhuTung,
-                          soLuong: payload.soLuong,
-                          donGiaGiaoDich: null,
-                          maNhaCungCap: '',
-                          nhanVienThucHien: payload.nhanVienThucHien,
-                          maDonDatHang: '',
-                          ghiChu: payload.ghiChu || '',
-                          clientRequestId: payload.clientRequestId,
-                        },
-                      });
+                    {
+                      viaWebhook: (webhookUrl) =>
+                        appendTransactionViaWebhook({ webhookUrl, tx: txForSheet }),
+                      viaOAuth: async (spreadsheetId, accessToken) => {
+                        await appendTransactionToGoogleSheet({
+                          spreadsheetId,
+                          accessToken,
+                          tx: txForSheet,
+                        });
+                      },
                     }
                   );
                   return res;
@@ -813,12 +878,13 @@ export default function App() {
         <KpiAnalysisPage
           state={state}
           onSelectItem={(it) => setSelectedPartCode(it.catalog.maPhuTung)}
-          onSaveThamSo={(payload) =>
-            runWithConfirmation(
+          onSaveThamSo={(payload) => {
+            const autoWrite = sheetsWriteMode !== 'NONE';
+            return runWithConfirmation(
               {
                 title: 'Xác nhận cập nhật tham số vận hành (THAM SO)',
-                description: googleWriteConnected
-                  ? 'Tham số mới sẽ được lưu vào Firebase Firestore và cập nhật trực tiếp sang tab "THAM SO" trên Google Sheets.'
+                description: autoWrite
+                  ? 'Tham số mới sẽ được lưu vào Firebase Firestore và tự động cập nhật sang tab "THAM SO" trên Google Sheets.'
                   : 'Tham số mới sẽ được lưu vào Firebase Firestore, đồng bộ mọi thiết bị và tự động tính lại toàn bộ chỉ số ROP, Safety Stock và đề xuất đặt hàng.',
                 sheetName: 'Firebase Firestore (system_metadata/tham_so_override)',
                 details: [
@@ -840,10 +906,10 @@ export default function App() {
                     value: `${payload.soNgayCanhBaoTruoc} ngày`,
                   },
                 ],
-                confirmLabel: googleWriteConnected
+                confirmLabel: autoWrite
                   ? 'Lưu tham số & cập nhật Sheets'
                   : 'Lưu tham số vào Firebase',
-                willWriteGoogleSheet: googleWriteConnected,
+                willWriteGoogleSheet: autoWrite,
               },
               async () => {
                 setSyncState('SYNCING');
@@ -852,12 +918,16 @@ export default function App() {
                   setSyncState('CONNECTED_RW');
                   await trySyncToGoogleSheet(
                     'Đã cập nhật tham số vận hành',
-                    async (spreadsheetId, accessToken) => {
-                      await updateThamSoInGoogleSheet({
-                        spreadsheetId,
-                        accessToken,
-                        thamSo: payload,
-                      });
+                    {
+                      viaWebhook: (webhookUrl) =>
+                        updateThamSoViaWebhook({ webhookUrl, thamSo: payload }),
+                      viaOAuth: async (spreadsheetId, accessToken) => {
+                        await updateThamSoInGoogleSheet({
+                          spreadsheetId,
+                          accessToken,
+                          thamSo: payload,
+                        });
+                      },
                     }
                   );
                 } catch (err) {
@@ -865,8 +935,8 @@ export default function App() {
                   throw err;
                 }
               }
-            )
-          }
+            );
+          }}
           onResetThamSo={() =>
             runWithConfirmation(
               {
@@ -910,6 +980,7 @@ export default function App() {
         <SettingsSyncPage
           state={state}
           configuredSheetId={configuredSheetId}
+          configuredWebhookUrl={configuredWebhookUrl}
           googleWriteConnected={googleWriteConnected}
           googleUserEmail={googleUserEmail}
           googleAuthBusy={googleAuthBusy}
@@ -935,6 +1006,25 @@ export default function App() {
                   ? `Đã đổi sang Google Sheet ${refData.spreadsheetId}, đồng bộ qua Firebase & nạp thêm ${addedCount} giao dịch từ Sheet.`
                   : `Đã đổi sang Google Sheet ${refData.spreadsheetId} và đồng bộ qua Firebase tới mọi thiết bị.`,
             });
+          }}
+          onSaveWebhookUrl={async (webhookUrl) => {
+            const effectiveId = getEffectiveSpreadsheetId();
+            const trimmed = webhookUrl.trim();
+            if (trimmed) {
+              const ping = await pingAppsScriptWebhook(trimmed);
+              if (
+                ping.spreadsheetId &&
+                ping.spreadsheetId !== effectiveId
+              ) {
+                throw new Error(
+                  `Link Apps Script này thuộc file "${ping.spreadsheetName || ping.spreadsheetId}", không khớp với Google Sheet đang chọn (${effectiveId}).`
+                );
+              }
+            }
+            await saveGoogleWebhookUrlInFirestore(effectiveId, trimmed);
+            const nextVal = trimmed || null;
+            configuredWebhookUrlRef.current = nextVal;
+            setConfiguredWebhookUrl(nextVal);
           }}
           onImportSheetTransactions={async () => {
             if (!sheetRef) return;
@@ -975,21 +1065,36 @@ export default function App() {
                 willWriteGoogleSheet: true,
               },
               async () => {
-                const token = getGoogleAccessToken();
-                if (!token) {
-                  throw new Error(
-                    'Chưa có phiên đăng nhập Google Sheets. Vui lòng nhấn "Sign in with Google" trước.'
-                  );
-                }
+                const webhookUrl = configuredWebhookUrlRef.current || configuredWebhookUrl;
                 setSyncState('SYNCING');
                 try {
-                  const summary = await syncAllWebStateToGoogleSheet({
-                    spreadsheetId: effectiveId,
-                    accessToken: token,
-                    items: state.items,
-                    transactions: state.transactions,
-                    thamSoOverride,
-                  });
+                  let summary: {
+                    addedTxCount: number;
+                    syncedPartsCount: number;
+                    updatedThamSo: boolean;
+                  };
+                  if (webhookUrl) {
+                    summary = await syncAllViaWebhook({
+                      webhookUrl,
+                      items: state.items,
+                      transactions: state.transactions,
+                      thamSoOverride,
+                    });
+                  } else {
+                    const token = getGoogleAccessToken();
+                    if (!token) {
+                      throw new Error(
+                        'Chưa bật Apps Script Webhook hoặc OAuth. Vui lòng kích hoạt Apps Script Webhook trước.'
+                      );
+                    }
+                    summary = await syncAllWebStateToGoogleSheet({
+                      spreadsheetId: effectiveId,
+                      accessToken: token,
+                      items: state.items,
+                      transactions: state.transactions,
+                      thamSoOverride,
+                    });
+                  }
                   await syncSheetReference(true);
                   setSyncState('CONNECTED_RW');
                   setToast({
@@ -1027,9 +1132,7 @@ export default function App() {
       <ConfirmMutationModal
         pending={pendingMutation?.details ?? null}
         busy={mutationBusy}
-        googleWriteConnected={googleWriteConnected}
-        googleAuthBusy={googleAuthBusy}
-        onGoogleSignIn={handleGoogleSignIn}
+        sheetsWriteMode={sheetsWriteMode}
         onConfirm={() => pendingMutation?.execute()}
         onCancel={() => pendingMutation?.cancel()}
       />
